@@ -6,117 +6,144 @@ tables, the platform first understands their business meaning, discovers relatio
 them, builds an Enterprise Context Model, validates and standardizes the data, and then performs
 AI-assisted, explainable ATUM mapping — so only trusted, TBM-ready data reaches Apptio.
 
-This repo currently implements **Layer 1: Enterprise Data Ingestion (Excel)**, the foundation the
-rest of the pipeline (semantic understanding, embeddings, knowledge graph, trust/standardization,
-ATUM mapping, TBM model generation, AI assistant, dashboards) builds on.
+## End-to-End Workflow
 
-## Architecture
+### Stage 1 — Enterprise Data Ingestion *(implemented)*
+The platform accepts structured and semi-structured enterprise datasets from multiple sources.
+
+Supported sources include:
+- General Ledger (GL)
+- ERP
+- AWS Billing
+- Azure Billing
+- GCP Billing
+- CMDB
+- Cost Center Master
+- Application Inventory
+- HR Systems
+- Business Unit Mapping
+- CSV
+- Excel
+- APIs
+- SQL Databases
+
+Each dataset is profiled to extract metadata, schema information, and representative sample records.
+
+### Stage 2 — Intelligent Data Understanding *(implemented)*
+Rather than immediately cleaning the data, the platform first understands it.
+
+AI automatically:
+- Classifies each uploaded file.
+- Identifies the business purpose of every dataset.
+- Understands the semantic meaning of columns.
+- Detects primary and foreign keys.
+- Discovers relationships between datasets.
+- Filters out irrelevant technical columns such as UUIDs, timestamps, and surrogate IDs.
+- Generates a canonical enterprise schema.
+
+This stage creates a semantic understanding of enterprise data instead of relying solely on column names.
+
+### Stage 3 — Semantic Representation *(implemented)*
+Business entities are converted into embeddings.
+
+Examples include:
+- Applications
+- Services
+- Vendors
+- Business Units
+- Departments
+- Cost Centers
+- Cloud Resources
+
+Embeddings allow the platform to identify semantically similar entities across different systems, even when naming conventions differ.
+
+Example: `Amazon EC2`, `AWS EC2`, `Elastic Compute` are recognized as representing the same business concept.
+
+### Stage 4 — Enterprise Context Model
+Using the discovered relationships and semantic similarity, the platform builds an Enterprise Context Model (Knowledge Graph).
+
+Instead of isolated tables, the system understands connected business entities.
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         React Frontend (TS)                         │
-│  Upload UI · Dataset Catalog · Schema Viewer · Review Queue · Chat   │
-└───────────────────────────────┬─────────────────────────────────────┘
-                                 │ REST
-┌───────────────────────────────▼─────────────────────────────────────┐
-│                    API Layer (Node + Express, TS)                   │
-│         Auth · Multipart upload handling · Route → graph triggers    │
-└───────────────────────────────┬─────────────────────────────────────┘
-                                 │
-┌───────────────────────────────▼─────────────────────────────────────┐
-│                LangGraph Orchestration Layer (TS)                   │
-│  StateGraph per pipeline stage: Ingestion → Understanding →          │
-│  Embedding → Context Model → Trust/Standardize → ATUM Mapping →      │
-│  TBM Model Generation. Nodes are LLM calls, deterministic            │
-│  transforms, or human-in-the-loop checkpoints.                       │
-└───────┬──────────────────────────┬───────────────────────┬──────────┘
-        │                          │                       │
-┌───────▼────────┐      ┌──────────▼─────────┐   ┌─────────▼─────────┐
-│   Postgres      │      │  Vector DB          │   │ Object Storage    │
-│  datasets,       │      │ (Qdrant/Weaviate/   │   │ raw uploaded       │
-│  columns,        │      │  Chroma — TBD)      │   │ Excel files        │
-│  relationships,  │      │ entity + column     │   └───────────────────┘
-│  quality_issues, │      │ embeddings          │
-│  atum_mappings   │      └─────────────────────┘
-└──────────────────┘
+General Ledger
+      ↓
+Cost Center
+      ↓
+Business Unit
+      ↓
+Application
+      ↓
+Cloud Resource
+      ↓
+Invoice
 ```
 
-**Why Postgres + a separate vector store:** all relational/queryable state (dataset metadata,
-column profiles, discovered relationships, quality issues, ATUM mappings, audit trail) lives in
-Postgres, where dashboards and the knowledge graph edges can be queried directly with SQL. Only
-embeddings (for semantic similarity — e.g. recognizing "Amazon EC2" / "AWS EC2" / "Elastic
-Compute" as the same concept) go into a dedicated vector store, since that access pattern (ANN
-search) doesn't fit relational tables well.
+This contextual understanding enables more accurate reasoning throughout the pipeline.
 
-## Monorepo layout
+### Stage 5 — Data Trust & Standardization Engine
+The platform standardizes and validates enterprise data.
 
-```
-apps/
-  api/            Express API — upload endpoint, dataset catalog endpoints
-  web/             React (Vite) — upload UI, dataset catalog, column-level detail view
-packages/
-  db/              Postgres schema (SQL migrations), typed client, repository functions
-  langgraph/       LangGraph StateGraph(s) — currently: the Layer 1 ingestion graph
-```
+Capabilities include:
+- **Schema Standardization** — column normalization, canonical schema generation
+- **Value Standardization** — vendor names, service names, department names, cost center names
+- **Data Cleaning** — missing values, duplicate records, invalid references, orphan records, inconsistent hierarchies, invalid currencies, invalid dates, outlier detection
 
-## Layer 1: Ingestion workflow
+AI recommends possible fixes for detected issues.
 
-```
-User selects one or more Excel files in the React UI
-        │
-        ▼
-POST /api/datasets/upload  (multipart, batched with a concurrency cap of 3)
-        │
-        ▼
-Per file → Ingestion StateGraph run (packages/langgraph/src/graphs/ingestionGraph.ts)
-        │
-        ├─ parseExcel        → reads the first worksheet via exceljs (headers + rows)
-        ├─ profileDataset    → per-column type inference, null %, distinct count,
-        │                       sample values, candidate-key detection
-        ├─ inferSourceType   → classifies the dataset (GL / ERP / AWS Billing / CMDB / ...).
-        │                       Uses an LLM when OPENAI_API_KEY is set; otherwise falls back
-        │                       to keyword heuristics so the pipeline runs with zero config.
-        └─ persist           → writes to Postgres: datasets, dataset_columns, ingestion_runs
-        │
-        ▼
-Dataset appears in the React catalog with status "profiled", source-type + confidence badge,
-and a drill-down column view (type, null %, distinct count, sample values, candidate keys).
-```
+The platform generates:
+- Data Quality Report
+- TBM Readiness Score
+- Recommended Corrections
 
-Each uploaded file runs through its own graph invocation; the API fans batches out with a
-concurrency cap rather than running everything serially or unbounded in parallel (keeps LLM rate
-limits and memory use in check for large multi-file uploads).
+### Stage 6 — AI-Assisted ATUM Mapping
+Using the Enterprise Context Model, embeddings, Retrieval-Augmented Generation (RAG), the ATUM Knowledge Base, and business rules, the platform automatically maps client-specific terminology into standardized ATUM categories.
 
-Stage 2 (semantic understanding — column-level business meaning, PK/FK detection across datasets,
-canonical schema generation) is intentionally a **separate** graph that will run after ingestion
-completes, so ingestion stays fast and the LLM-heavier understanding step can run async with
-progress streamed to the UI.
+Generated output includes:
+- Tower
+- Sub-Tower
+- Service Domain
+- Confidence Score
+- Explainable Reasoning
+- Supporting Evidence
 
-## Data model (Layer 1)
+Low-confidence mappings are routed to consultants for review.
 
-```sql
-datasets          -- one row per uploaded file: file_name, source_type (+confidence),
-                   -- status, storage_path, row_count, uploaded_by/at
-dataset_columns   -- one row per column per dataset: inferred_type, null_pct, distinct_count,
-                   -- sample_values, is_candidate_key, semantic_role (filled in Stage 2)
-ingestion_runs    -- audit trail per pipeline stage per dataset: status, error, timestamps
-```
+### Stage 7 — TBM Data Model Generation
+The validated and standardized datasets are transformed into an Apptio-ready TBM data model. Relationships between cost centers, business units, applications, cloud resources, vendors, and financial transactions are preserved, enabling accurate financial modeling within IBM Apptio.
 
-`semantic_role` / `semantic_role_confidence` on `dataset_columns` and `source_type` on `datasets`
-are left nullable now and populated by the Stage 2 (Understanding) graph later, without a schema
-migration.
+### Stage 8 — AI Assistant
+An AI assistant enables consultants and business users to interact with the platform using natural language.
 
-## Getting started
+Example queries include:
+- Why was this mapped to Cloud Compute?
+- Which datasets contain quality issues?
+- Why is the readiness score low?
+- Show unmapped services.
+- Explain this allocation.
+- Recommend fixes.
+
+The assistant leverages the Enterprise Context Model, historical mappings, and RAG to provide explainable responses.
+
+### Stage 9 — Analytics Dashboard
+The platform provides interactive dashboards for:
+- **Data Quality** — TBM Readiness Score, missing values, duplicate records, relationship quality, mapping coverage
+- **Financial Insights** — cost by tower, business unit, application, cloud provider
+- **Trend Analysis** — month-over-month spending, cost spikes, outlier detection, new service identification
+- **AI Insights** — mapping confidence, high-risk datasets, recommended fixes, explainability reports
+
+## Steps to Run
 
 ### Prerequisites
 - Node.js 20+
-- A running Postgres instance
+- A Postgres database (Supabase recommended — Stage 3 uses its built-in `pgvector` extension for embeddings)
 
 ### Setup
 
 ```bash
 npm install
-cp .env.example .env   # set DATABASE_URL; OPENAI_API_KEY is optional
+cp .env.example .env   # set DATABASE_URL (use the Supabase connection pooler URI, not the direct host)
+                        # OPENAI_API_KEY enables LLM classification/understanding/embeddings;
+                        # without it, Stage 1-2 fall back to heuristics
 npm run build           # builds packages/db and packages/langgraph
 npm run db:migrate      # applies packages/db/migrations
 ```
@@ -128,20 +155,7 @@ npm run dev:api          # starts the API on http://localhost:4000
 npm run dev:web          # starts the React app on http://localhost:5173 (proxies /api → 4000)
 ```
 
-Open http://localhost:5173, drag in one or more `.xlsx` files, and watch them land in the
-Dataset Catalog with inferred source type, row/column counts, and a per-column profile.
-
-## Roadmap (next layers)
-
-1. **Stage 2 — Understanding graph**: column semantic-role classification, primary/foreign key
-   detection across datasets, canonical schema generation.
-2. **Stage 3 — Embeddings**: entity/column embeddings into the vector store for cross-dataset
-   semantic matching.
-3. **Stage 4 — Enterprise Context Model**: relationship/knowledge-graph tables in Postgres linking
-   GL → Cost Center → Business Unit → Application → Cloud Resource → Invoice.
-4. **Stage 5 — Trust & Standardization**: rule-based + AI-recommended data quality fixes, TBM
-   Readiness Score.
-5. **Stage 6 — ATUM Mapping**: RAG over an ATUM knowledge base, confidence-scored mappings with
-   explainable reasoning, human review queue for low-confidence cases.
-6. **Stages 7-9**: TBM data model generation, AI assistant (chat over the Context Model), and the
-   analytics dashboard.
+Open http://localhost:5173, drag in one or more `.xlsx` files. Each upload automatically runs
+through ingestion → understanding → embedding, and results appear in the Dataset Catalog, the
+per-dataset detail view (columns, semantic roles, discovered relationships), and the Semantic
+Matches panel.
