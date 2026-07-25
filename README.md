@@ -59,7 +59,7 @@ Embeddings allow the platform to identify semantically similar entities across d
 
 Example: `Amazon EC2`, `AWS EC2`, `Elastic Compute` are recognized as representing the same business concept.
 
-### Stage 4 — Enterprise Context Model
+### Stage 4 — Enterprise Context Model *(implemented)*
 Using the discovered relationships and semantic similarity, the platform builds an Enterprise Context Model (Knowledge Graph).
 
 Instead of isolated tables, the system understands connected business entities.

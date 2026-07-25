@@ -107,3 +107,80 @@ export async function fetchSemanticMatches(): Promise<SemanticMatch[]> {
   const data = await res.json();
   return data.matches as SemanticMatch[];
 }
+
+// ---------- Stage 4: Enterprise Context Model ----------
+
+export interface ContextNode {
+  id: string;
+  entity_type: string;
+  canonical_name: string;
+  source_dataset_id: string | null;
+  resolution_confidence: number;
+  alias_count: number;
+}
+
+export interface ContextEdge {
+  id: string;
+  from_entity_id: string;
+  to_entity_id: string;
+  edge_type: string;
+  weight: number;
+  confidence: number;
+  evidence_dataset_id: string | null;
+  label: string | null;
+  from_name: string;
+  from_type: string;
+  to_name: string;
+  to_type: string;
+}
+
+export interface ContextGraphResponse {
+  nodes: ContextNode[];
+  edges: ContextEdge[];
+}
+
+export interface ContextRebuildStats {
+  entityCount: number;
+  aliasCount: number;
+  edgeCount: number;
+  datasetsProcessed: number;
+  datasetsSkipped: string[];
+  hashFallbackRatio: number;
+}
+
+export interface ContextRebuildResult {
+  ok: boolean;
+  stats: ContextRebuildStats;
+  warnings: string[];
+}
+
+export interface ContextTraceNode {
+  id: string;
+  entity_type: string;
+  canonical_name: string;
+  resolution_confidence: number;
+  depth: number;
+}
+
+export interface ContextTraceResult {
+  nodes: ContextTraceNode[];
+  edges: ContextEdge[];
+}
+
+export async function rebuildContextModel(): Promise<ContextRebuildResult> {
+  const res = await fetch(`${API_BASE}/context/rebuild`, { method: "POST" });
+  if (!res.ok) throw new Error(`Failed to rebuild context model: ${res.statusText}`);
+  return res.json();
+}
+
+export async function fetchContextGraph(): Promise<ContextGraphResponse> {
+  const res = await fetch(`${API_BASE}/context/graph`);
+  if (!res.ok) throw new Error(`Failed to fetch context graph: ${res.statusText}`);
+  return res.json();
+}
+
+export async function fetchContextTrace(entityId: string, depth = 6): Promise<ContextTraceResult> {
+  const res = await fetch(`${API_BASE}/context/entities/${entityId}/trace?depth=${depth}`);
+  if (!res.ok) throw new Error(`Failed to fetch trace: ${res.statusText}`);
+  return res.json();
+}

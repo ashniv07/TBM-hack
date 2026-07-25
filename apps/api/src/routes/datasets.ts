@@ -5,7 +5,7 @@ import fs from "fs";
 import { runEmbedding, runIngestion, runUnderstanding } from "@tbm/langgraph";
 import { getDataset, getDatasetColumns, getRelationshipsForDataset, listDatasets } from "@tbm/db";
 
-const UPLOAD_DIR = path.join(__dirname, "..", "..", "storage", "uploads");
+export const UPLOAD_DIR = path.join(__dirname, "..", "..", "storage", "uploads");
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 const upload = multer({
@@ -54,7 +54,7 @@ datasetsRouter.post("/upload", upload.array("files", 20), async (req, res) => {
           // ingestion — the dataset still shows up in the catalog either way.
           try {
             await runUnderstanding(ingested.datasetId);
-            await runEmbedding(ingested.datasetId);
+            await runEmbedding(ingested.datasetId, { uploadsDir: UPLOAD_DIR });
           } catch (stageErr) {
             return {
               fileName: file.originalname,
@@ -109,7 +109,7 @@ datasetsRouter.post("/:id/understand", async (req, res) => {
 datasetsRouter.post("/:id/embed", async (req, res) => {
   const dataset = await getDataset(req.params.id);
   if (!dataset) return res.status(404).json({ error: "Dataset not found" });
-  const result = await runEmbedding(req.params.id);
+  const result = await runEmbedding(req.params.id, { uploadsDir: UPLOAD_DIR });
   if (result.error) return res.status(500).json({ error: result.error });
   res.json({ ok: true, embeddedCount: result.embeddedCount });
 });

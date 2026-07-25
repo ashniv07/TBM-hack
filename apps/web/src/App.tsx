@@ -4,6 +4,7 @@ import { UploadPanel } from "./components/UploadPanel";
 import { DatasetCatalog } from "./components/DatasetCatalog";
 import { DatasetDetail } from "./components/DatasetDetail";
 import { SemanticMatches } from "./components/SemanticMatches";
+import { ContextGraph } from "./components/ContextGraph";
 
 export default function App() {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
@@ -50,6 +51,15 @@ export default function App() {
             Entities recognized as the same business concept despite different naming (Stage 3 embeddings).
           </p>
           <SemanticMatches key={matchesKey} />
+        </section>
+
+        <section>
+          <h2>Enterprise Context Model</h2>
+          <p className="section-hint">
+            Knowledge graph connecting datasets and business entities (Stage 4) — e.g. General Ledger → Cost Center →
+            Business Unit → Application → Cloud Resource.
+          </p>
+          <ContextGraph />
         </section>
       </main>
     </div>

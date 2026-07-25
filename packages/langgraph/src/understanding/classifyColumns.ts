@@ -11,6 +11,10 @@ export const SEMANTIC_ROLES = [
   "department",
   "cost_center",
   "cloud_resource",
+  "cloud_provider",
+  "infrastructure_asset",
+  "project",
+  "person",
   "cost_amount",
   "identifier",
   "date",
@@ -22,6 +26,114 @@ const TECHNICAL_NAME_PATTERN = /(^id$|_id$|uuid|guid|surrogate|_key$|^key$|row_h
 const TIMESTAMP_NAME_PATTERN = /(created_at|updated_at|_ts$|timestamp|load_date|etl_date)/i;
 const UUID_VALUE_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// Only strips whitespace/underscore/hyphen (common word-separator variants),
+// so "Vendor Name" / "VendorName" / "vendor_name" all normalize identically —
+// but NOT all punctuation. Stripping everything (including "+") previously
+// collapsed "Cost Center Name" and "Cost Center + Name" to the same key,
+// silently force-classifying a derived, concatenated display column
+// ("Apps - Mfg & Dist (CC-210)") as its own cost_center entity, duplicating
+// every real cost center in the graph.
+function normalizeForRoleOverride(name: string): string {
+  return name.toLowerCase().replace(/[\s_-]/g, "");
+}
+
+// Deterministic column-name -> role overrides, checked AFTER classification
+// (LLM or heuristic) and applied unconditionally, overriding whatever role
+// was guessed. This exists because the LLM is not reliable enough on its
+// own for business-critical roles: it has been observed live to classify
+// "Vendor Name" and "Manufacturer" as "description"/"other" on some runs,
+// which silently drops real vendor entities (Microsoft, SAP, EMC, ...) from
+// the Stage 4 graph. Matched against the normalized (lowercased,
+// punctuation/whitespace-stripped) column name so "Vendor Name", "VendorName",
+// and "vendor_name" all match the same key. Exact-match (not substring regex)
+// on purpose, to avoid false positives like "Vendor Contact Email" being
+// forced to role "vendor".
+const DETERMINISTIC_ROLE_OVERRIDES: Record<string, (typeof SEMANTIC_ROLES)[number]> = {
+  // Vendor / supplier
+  vendorname: "vendor",
+  vendor: "vendor",
+  vendorid: "vendor",
+  supplier: "vendor",
+  suppliername: "vendor",
+  supplierid: "vendor",
+  manufacturer: "vendor",
+
+  // Cost center
+  costcenter: "cost_center",
+  costcentre: "cost_center",
+  costcentername: "cost_center",
+
+  // Business unit
+  businessunit: "business_unit",
+  bu: "business_unit",
+  buname: "business_unit",
+
+  // Department
+  department: "department",
+  departmentname: "department",
+  departmentdescription: "department",
+
+  // Application
+  application: "application",
+  applicationname: "application",
+  app: "application",
+  appconsumer: "application",
+
+  // Cloud provider
+  cloudprovider: "cloud_provider",
+  cloudvendor: "cloud_provider",
+  csp: "cloud_provider",
+
+  // Infrastructure asset
+  storagedeviceid: "infrastructure_asset",
+  serverid: "infrastructure_asset",
+  assetid: "infrastructure_asset",
+
+  // Project
+  projectid: "project",
+  projectname: "project",
+
+  // Person / metadata — kept out of EMBEDDABLE_ROLES, so forcing this role
+  // guarantees these never become graph nodes regardless of LLM opinion.
+  owner: "person",
+  costcenterowner: "person",
+  manager: "person",
+  contact: "person",
+  contactname: "person",
+  createdby: "person",
+  updatedby: "person",
+
+  // Transactional identifiers — technical, excluded from the graph the same way.
+  journalid: "identifier",
+  voucherid: "identifier",
+  invoicenumber: "identifier",
+  ponumber: "identifier",
+};
+
+// A "+" in a column name (e.g. "Cost Center + Name") is a strong, low-false-
+// positive signal that the column is a derived/concatenated display label
+// built from other, more atomic columns that are already classified (and
+// embedded) on their own — e.g. "Cost Center Name" and "Cost Center" already
+// capture the real entity. Embedding the concatenation too would just
+// duplicate every real entity under a second, differently-formatted name.
+const CONCATENATED_COLUMN_PATTERN = /\+/;
+
+export function applyDeterministicRoleOverrides(classifications: ColumnClassification[]): ColumnClassification[] {
+  return classifications.map((c) => {
+    if (CONCATENATED_COLUMN_PATTERN.test(c.columnName)) {
+      return { ...c, semanticRole: "description", semanticRoleConfidence: 1, isTechnical: false };
+    }
+    const override = DETERMINISTIC_ROLE_OVERRIDES[normalizeForRoleOverride(c.columnName)];
+    if (!override) return c;
+    return {
+      ...c,
+      semanticRole: override,
+      semanticRoleConfidence: 1,
+      isTechnical: override === "identifier",
+    };
+  });
+}
+
 const KEYWORD_ROLE_MAP: [RegExp, (typeof SEMANTIC_ROLES)[number]][] = [
   [/vendor|supplier/i, "vendor"],
   [/application|app_name|app_id/i, "application"],
@@ -30,6 +142,7 @@ const KEYWORD_ROLE_MAP: [RegExp, (typeof SEMANTIC_ROLES)[number]][] = [
   [/department|dept/i, "department"],
   [/cost_center|costcenter|cc_code/i, "cost_center"],
   [/resource|instance|ec2|compute/i, "cloud_resource"],
+  [/owner|manager|employee_name|contact_name|approver/i, "person"],
   [/debit|credit|amount|cost|price|spend/i, "cost_amount"],
   [/date|_dt$/i, "date"],
   [/description|desc$/i, "description"],
@@ -134,12 +247,15 @@ export async function classifyColumnsNode(state: UnderstandingState): Promise<Pa
   if (process.env.OPENAI_API_KEY) {
     const llmResult = await llmClassify(dataset.source_type, columns);
     if (llmResult) {
-      return { businessPurpose: llmResult.businessPurpose, classifications: llmResult.classifications };
+      return {
+        businessPurpose: llmResult.businessPurpose,
+        classifications: applyDeterministicRoleOverrides(llmResult.classifications),
+      };
     }
   }
 
   return {
     businessPurpose: `${dataset.source_type ?? "Enterprise"} dataset with ${columns.length} columns (heuristic classification, no LLM available).`,
-    classifications: columns.map(heuristicClassifyColumn),
+    classifications: applyDeterministicRoleOverrides(columns.map(heuristicClassifyColumn)),
   };
 }
