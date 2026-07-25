@@ -73,3 +73,69 @@ export interface SemanticMatch {
   column_b_name: string;
   distance: number;
 }
+
+// ---------- Stage 4: Enterprise Context Model (Knowledge Graph) ----------
+
+export interface RawEntityEmbeddingRow {
+  id: string;
+  dataset_id: string;
+  column_id: string;
+  entity_value: string;
+  embedding: number[];
+  embedding_source: string;
+  semantic_role: string;
+  column_name: string;
+}
+
+export interface ContextEntityInput {
+  tempId: string;
+  entityType: string;
+  canonicalName: string;
+  confidence: number;
+}
+
+export interface ContextDatasetNodeInput {
+  tempId: string;
+  datasetId: string;
+  canonicalName: string;
+}
+
+export interface ContextAliasInput {
+  entityTempId: string;
+  datasetId: string;
+  columnId: string;
+  entityValue: string;
+}
+
+export interface ContextEdgeInput {
+  fromTempId: string;
+  toTempId: string;
+  edgeType: string;
+  weight: number;
+  confidence: number;
+  evidenceDatasetId?: string;
+  label?: string;
+}
+
+export interface ContextEntityRow {
+  id: string;
+  entity_type: string;
+  canonical_name: string;
+  source_dataset_id: string | null;
+  resolution_confidence: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ContextEdgeRow {
+  id: string;
+  from_entity_id: string;
+  to_entity_id: string;
+  edge_type: string;
+  weight: number;
+  confidence: number;
+  evidence_dataset_id: string | null;
+  label: string | null;
+  created_at: string;
+  updated_at: string;
+}

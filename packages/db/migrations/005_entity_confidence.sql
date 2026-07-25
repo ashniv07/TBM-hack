@@ -1,0 +1,11 @@
+-- Stage 4 improvement: per-entity resolution confidence.
+--
+-- Without this, a cluster formed by merging two values across a borderline
+-- embedding distance (e.g. 0.149, just under the 0.15 threshold) looked
+-- identical to a cluster built purely from exact-string matches — yet the
+-- former is a real judgment call and the latter is certain. This column
+-- lets downstream consumers (UI, Stage 5/6) tell the two apart.
+--
+-- Dataset-nodes are a direct 1:1 mapping (no clustering judgment involved),
+-- so they keep the default of 1 (certain).
+alter table context_entities add column if not exists resolution_confidence numeric not null default 1;

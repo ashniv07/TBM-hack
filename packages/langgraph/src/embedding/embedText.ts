@@ -19,16 +19,19 @@ function hashEmbedding(text: string): number[] {
   return vector.map((v) => v / norm);
 }
 
-export async function embedTexts(texts: string[]): Promise<number[][]> {
+export type EmbeddingSource = "openai" | "hash_fallback";
+
+export async function embedTexts(texts: string[]): Promise<{ vectors: number[][]; source: EmbeddingSource }> {
   if (!process.env.OPENAI_API_KEY) {
-    return texts.map(hashEmbedding);
+    return { vectors: texts.map(hashEmbedding), source: "hash_fallback" };
   }
 
   try {
     const { OpenAIEmbeddings } = await import("@langchain/openai");
     const embedder = new OpenAIEmbeddings({ model: "text-embedding-3-small" });
-    return await embedder.embedDocuments(texts);
+    const vectors = await embedder.embedDocuments(texts);
+    return { vectors, source: "openai" };
   } catch {
-    return texts.map(hashEmbedding);
+    return { vectors: texts.map(hashEmbedding), source: "hash_fallback" };
   }
 }

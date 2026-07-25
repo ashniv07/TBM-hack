@@ -4,6 +4,7 @@ import { embedEntitiesNode } from "../embedding/embedEntities";
 
 const EmbeddingAnnotation = Annotation.Root({
   datasetId: Annotation<string>(),
+  uploadsDir: Annotation<string | undefined>(),
   embeddedCount: Annotation<number | undefined>(),
   error: Annotation<string | undefined>(),
 });
@@ -19,7 +20,7 @@ function buildEmbeddingGraph() {
 
 export const embeddingGraph = buildEmbeddingGraph();
 
-export async function runEmbedding(datasetId: string): Promise<EmbeddingState> {
-  const result = await embeddingGraph.invoke({ datasetId });
+export async function runEmbedding(datasetId: string, options?: { uploadsDir?: string }): Promise<EmbeddingState> {
+  const result = await embeddingGraph.invoke({ datasetId, uploadsDir: options?.uploadsDir });
   return result as EmbeddingState;
 }

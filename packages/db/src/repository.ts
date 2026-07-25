@@ -1,9 +1,28 @@
 import { getPool } from "./pool";
-import { Dataset, DatasetColumn, DatasetRelationshipView, DatasetStatus, EmbeddableColumn, SemanticMatch } from "./types";
+import {
+  ContextAliasInput,
+  ContextDatasetNodeInput,
+  ContextEdgeInput,
+  ContextEdgeRow,
+  ContextEntityInput,
+  ContextEntityRow,
+  Dataset,
+  DatasetColumn,
+  DatasetRelationshipView,
+  DatasetStatus,
+  EmbeddableColumn,
+  RawEntityEmbeddingRow,
+  SemanticMatch,
+} from "./types";
 
 // Semantic roles that represent real-world business entities worth embedding
-// for cross-dataset similarity search (Stage 3). Structural/measure columns
-// (amounts, dates, technical IDs) are intentionally excluded.
+// for cross-dataset similarity search (Stage 3) and promoting to Stage 4
+// graph nodes. Structural/measure columns (amounts, dates, technical IDs) are
+// intentionally excluded — and so is "person": Stage 2 still classifies
+// Owner/Manager/Contact columns as person (so they're not mislabeled as a
+// business unit or department), but individual human names are metadata
+// about a business entity, not enterprise entities in their own right, so
+// they're deliberately never embedded or turned into graph nodes.
 export const EMBEDDABLE_ROLES = [
   "vendor",
   "application",
@@ -12,6 +31,9 @@ export const EMBEDDABLE_ROLES = [
   "department",
   "cost_center",
   "cloud_resource",
+  "cloud_provider",
+  "infrastructure_asset",
+  "project",
 ] as const;
 
 export async function createDataset(input: {
@@ -193,12 +215,15 @@ export async function upsertEntityEmbedding(input: {
   columnId: string;
   entityValue: string;
   embedding: number[];
+  embeddingSource: string;
 }) {
   await getPool().query(
-    `insert into entity_embeddings (dataset_id, column_id, entity_value, embedding)
-     values ($1, $2, $3, $4::vector)
-     on conflict (column_id, entity_value) do update set embedding = excluded.embedding`,
-    [input.datasetId, input.columnId, input.entityValue, toVectorLiteral(input.embedding)]
+    `insert into entity_embeddings (dataset_id, column_id, entity_value, embedding, embedding_source)
+     values ($1, $2, $3, $4::vector, $5)
+     on conflict (column_id, entity_value) do update set
+       embedding = excluded.embedding,
+       embedding_source = excluded.embedding_source`,
+    [input.datasetId, input.columnId, input.entityValue, toVectorLiteral(input.embedding), input.embeddingSource]
   );
 }
 
@@ -220,4 +245,260 @@ export async function getCrossDatasetMatches(maxDistance = 0.25, limit = 30): Pr
     [maxDistance, limit]
   );
   return rows;
+}
+
+// ---------- Stage 4: Enterprise Context Model (Knowledge Graph) ----------
+
+function parseVectorLiteral(value: string): number[] {
+  return value
+    .replace(/^\[|\]$/g, "")
+    .split(",")
+    .map(Number);
+}
+
+// All embeddable entity values across every dataset, joined back to their
+// semantic role, for Stage 4's cross-dataset clustering step.
+export async function getAllEmbeddableEntityRows(): Promise<RawEntityEmbeddingRow[]> {
+  const { rows } = await getPool().query(
+    `select ee.id, ee.dataset_id, ee.column_id, ee.entity_value, ee.embedding::text as embedding,
+            ee.embedding_source, dc.semantic_role, dc.column_name
+     from entity_embeddings ee
+     join dataset_columns dc on dc.id = ee.column_id
+     where dc.semantic_role = any($1::text[])`,
+    [EMBEDDABLE_ROLES]
+  );
+  return rows.map((r: any) => ({ ...r, embedding: parseVectorLiteral(r.embedding) }));
+}
+
+// Only datasets that have actually reached Stage 3 (i.e. have at least one
+// embedding) are eligible to become dataset-nodes in the context model —
+// this naturally excludes datasets stuck in "profiled"/"understood" due to
+// an earlier pipeline failure.
+export async function getDatasetsWithEmbeddings(): Promise<Dataset[]> {
+  const { rows } = await getPool().query<Dataset>(
+    `select distinct d.* from datasets d join entity_embeddings ee on ee.dataset_id = d.id order by d.file_name`
+  );
+  return rows;
+}
+
+// Rebuilds the entire context graph atomically: the old graph is only ever
+// replaced by a fully-formed new one, never left half-written by a failure
+// partway through (each rebuild runs in a single transaction).
+// Row count per batched INSERT — comfortably under Postgres' 65535-parameter
+// limit for every table here (7 columns/row at most => 3500 params/batch),
+// while cutting network round-trips to the (remote, shared) Supabase instance
+// from one-per-row to one-per-500-rows. This matters a lot in practice: Stage
+// 4 now embeds several more roles than before (vendor/project/cloud_provider/
+// infrastructure_asset), so a single rebuild can produce hundreds of aliases
+// and edges — at one round-trip each, that alone was taking minutes.
+const REBUILD_BATCH_SIZE = 500;
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const batches: T[][] = [];
+  for (let i = 0; i < items.length; i += size) batches.push(items.slice(i, i + size));
+  return batches;
+}
+
+export async function rebuildContextGraph(input: {
+  entities: ContextEntityInput[];
+  datasetNodes: ContextDatasetNodeInput[];
+  aliases: ContextAliasInput[];
+  edges: ContextEdgeInput[];
+}): Promise<{ entityCount: number; datasetNodeCount: number; aliasCount: number; edgeCount: number }> {
+  const client = await getPool().connect();
+  try {
+    await client.query("begin");
+    await client.query("delete from context_edges");
+    await client.query("delete from context_entity_aliases");
+    await client.query("delete from context_entities");
+
+    const idMap = new Map<string, string>();
+
+    // Batched multi-row INSERT ... RETURNING id. Postgres returns rows for a
+    // plain VALUES-list insert in the same order the values were given, so
+    // zipping the batch back onto the returned ids by index is safe here (no
+    // triggers/rules on context_entities that could reorder them). The length
+    // check below fails loudly instead of silently mismapping if that were
+    // ever violated.
+    for (const batch of chunk(input.datasetNodes, REBUILD_BATCH_SIZE)) {
+      if (batch.length === 0) continue;
+      const params: unknown[] = [];
+      const tuples = batch.map((node, i) => {
+        params.push(node.canonicalName, node.datasetId);
+        return `('dataset', $${i * 2 + 1}, $${i * 2 + 2})`;
+      });
+      const { rows } = await client.query(
+        `insert into context_entities (entity_type, canonical_name, source_dataset_id) values ${tuples.join(", ")} returning id`,
+        params
+      );
+      if (rows.length !== batch.length) throw new Error("Dataset node insert count mismatch during context rebuild");
+      batch.forEach((node, i) => idMap.set(node.tempId, rows[i].id));
+    }
+
+    for (const batch of chunk(input.entities, REBUILD_BATCH_SIZE)) {
+      if (batch.length === 0) continue;
+      const params: unknown[] = [];
+      const tuples = batch.map((entity, i) => {
+        params.push(entity.entityType, entity.canonicalName, entity.confidence);
+        return `($${i * 3 + 1}, $${i * 3 + 2}, $${i * 3 + 3})`;
+      });
+      const { rows } = await client.query(
+        `insert into context_entities (entity_type, canonical_name, resolution_confidence) values ${tuples.join(", ")} returning id`,
+        params
+      );
+      if (rows.length !== batch.length) throw new Error("Entity insert count mismatch during context rebuild");
+      batch.forEach((entity, i) => idMap.set(entity.tempId, rows[i].id));
+    }
+
+    const resolvedAliases = input.aliases
+      .map((alias) => ({ ...alias, entityId: idMap.get(alias.entityTempId) }))
+      .filter((alias): alias is typeof alias & { entityId: string } => Boolean(alias.entityId));
+
+    for (const batch of chunk(resolvedAliases, REBUILD_BATCH_SIZE)) {
+      if (batch.length === 0) continue;
+      const params: unknown[] = [];
+      const tuples = batch.map((alias, i) => {
+        params.push(alias.entityId, alias.datasetId, alias.columnId, alias.entityValue);
+        return `($${i * 4 + 1}, $${i * 4 + 2}, $${i * 4 + 3}, $${i * 4 + 4})`;
+      });
+      await client.query(
+        `insert into context_entity_aliases (context_entity_id, dataset_id, column_id, entity_value)
+         values ${tuples.join(", ")}
+         on conflict (column_id, entity_value) do update set context_entity_id = excluded.context_entity_id`,
+        params
+      );
+    }
+
+    const resolvedEdges = input.edges
+      .map((edge) => ({ ...edge, fromId: idMap.get(edge.fromTempId), toId: idMap.get(edge.toTempId) }))
+      .filter(
+        (edge): edge is typeof edge & { fromId: string; toId: string } =>
+          Boolean(edge.fromId) && Boolean(edge.toId) && edge.fromId !== edge.toId
+      );
+
+    for (const batch of chunk(resolvedEdges, REBUILD_BATCH_SIZE)) {
+      if (batch.length === 0) continue;
+      const params: unknown[] = [];
+      const tuples = batch.map((edge, i) => {
+        params.push(edge.fromId, edge.toId, edge.edgeType, edge.weight, edge.confidence, edge.evidenceDatasetId ?? null, edge.label ?? null);
+        const base = i * 7;
+        return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7})`;
+      });
+      await client.query(
+        `insert into context_edges (from_entity_id, to_entity_id, edge_type, weight, confidence, evidence_dataset_id, label)
+         values ${tuples.join(", ")}
+         on conflict (from_entity_id, to_entity_id, edge_type) do update set
+           weight = context_edges.weight + excluded.weight,
+           confidence = greatest(context_edges.confidence, excluded.confidence),
+           label = excluded.label,
+           updated_at = now()`,
+        params
+      );
+    }
+
+    await client.query("commit");
+    return {
+      entityCount: input.entities.length,
+      datasetNodeCount: input.datasetNodes.length,
+      aliasCount: resolvedAliases.length,
+      edgeCount: resolvedEdges.length,
+    };
+  } catch (err) {
+    await client.query("rollback");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+export async function getContextGraph(): Promise<{
+  nodes: (ContextEntityRow & { alias_count: number })[];
+  edges: (ContextEdgeRow & { from_name: string; from_type: string; to_name: string; to_type: string })[];
+}> {
+  const [nodesResult, edgesResult] = await Promise.all([
+    getPool().query(
+      `select ce.*, count(cea.id)::int as alias_count
+       from context_entities ce
+       left join context_entity_aliases cea on cea.context_entity_id = ce.id
+       group by ce.id
+       order by ce.entity_type, ce.canonical_name`
+    ),
+    getPool().query(
+      `select e.*, fa.canonical_name as from_name, fa.entity_type as from_type,
+              ta.canonical_name as to_name, ta.entity_type as to_type
+       from context_edges e
+       join context_entities fa on fa.id = e.from_entity_id
+       join context_entities ta on ta.id = e.to_entity_id
+       order by (e.edge_type = 'foreign_key') desc, e.confidence desc`
+    ),
+  ]);
+  return { nodes: nodesResult.rows, edges: edgesResult.rows };
+}
+
+export async function getContextEntityAliases(
+  contextEntityId: string
+): Promise<{ dataset_id: string; dataset_file_name: string; column_name: string; entity_value: string }[]> {
+  const { rows } = await getPool().query(
+    `select cea.dataset_id, d.file_name as dataset_file_name, dc.column_name, cea.entity_value
+     from context_entity_aliases cea
+     join datasets d on d.id = cea.dataset_id
+     join dataset_columns dc on dc.id = cea.column_id
+     where cea.context_entity_id = $1
+     order by d.file_name, dc.column_name`,
+    [contextEntityId]
+  );
+  return rows;
+}
+
+// Bounded-depth traversal from a single entity, treating edges as undirected
+// (a "contains_reference" edge is still walkable in reverse) so the result
+// reflects true connectivity rather than requiring the caller to know which
+// direction a given hop was stored in. Cycles are prevented via the path array.
+export async function traceFromEntity(
+  entityId: string,
+  maxDepth = 6
+): Promise<{
+  nodes: { id: string; entity_type: string; canonical_name: string; resolution_confidence: number; depth: number }[];
+  edges: (ContextEdgeRow & { from_name: string; to_name: string })[];
+}> {
+  const { rows: reach } = await getPool().query(
+    `with recursive traversal(entity_id, depth, path) as (
+       select $1::uuid, 0, array[$1::uuid]
+       union all
+       select
+         case when e.from_entity_id = t.entity_id then e.to_entity_id else e.from_entity_id end,
+         t.depth + 1,
+         t.path || (case when e.from_entity_id = t.entity_id then e.to_entity_id else e.from_entity_id end)
+       from traversal t
+       join context_edges e on e.from_entity_id = t.entity_id or e.to_entity_id = t.entity_id
+       where t.depth < $2
+         and not ((case when e.from_entity_id = t.entity_id then e.to_entity_id else e.from_entity_id end) = any(t.path))
+     )
+     select entity_id, min(depth) as depth from traversal group by entity_id order by depth asc`,
+    [entityId, maxDepth]
+  );
+
+  if (reach.length === 0) return { nodes: [], edges: [] };
+  const ids = reach.map((r) => r.entity_id);
+
+  const [{ rows: nodes }, { rows: edges }] = await Promise.all([
+    getPool().query(
+      `select id, entity_type, canonical_name, resolution_confidence from context_entities where id = any($1::uuid[])`,
+      [ids]
+    ),
+    getPool().query(
+      `select e.*, fa.canonical_name as from_name, ta.canonical_name as to_name
+       from context_edges e
+       join context_entities fa on fa.id = e.from_entity_id
+       join context_entities ta on ta.id = e.to_entity_id
+       where e.from_entity_id = any($1::uuid[]) and e.to_entity_id = any($1::uuid[])`,
+      [ids]
+    ),
+  ]);
+
+  const depthById = new Map<string, number>(reach.map((r) => [r.entity_id, Number(r.depth)]));
+  return {
+    nodes: nodes.map((n: any) => ({ ...n, depth: depthById.get(n.id) ?? 0 })),
+    edges,
+  };
 }
