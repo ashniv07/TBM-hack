@@ -5,6 +5,7 @@ import { DatasetCatalog } from "./components/DatasetCatalog";
 import { DatasetDetail } from "./components/DatasetDetail";
 import { SemanticMatches } from "./components/SemanticMatches";
 import { ContextGraph } from "./components/ContextGraph";
+import { DataQualityDashboard } from "./components/DataQualityDashboard";
 
 export default function App() {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
@@ -25,7 +26,7 @@ export default function App() {
     <div className="app">
       <header>
         <h1>TBM Data Trust & Intelligence Platform</h1>
-        <p className="subtitle">Stages 1-3 — Ingestion · Understanding · Semantic Representation</p>
+        <p className="subtitle">Stages 1-5 — Ingestion · Understanding · Embeddings · Knowledge Graph · Data Quality</p>
       </header>
 
       <main>
@@ -60,6 +61,15 @@ export default function App() {
             Business Unit → Application → Cloud Resource.
           </p>
           <ContextGraph />
+        </section>
+
+        <section>
+          <h2>Data Quality & TBM Readiness</h2>
+          <p className="section-hint">
+            Standardization engine analyzing data quality, detecting issues, proposing corrections, and calculating TBM
+            readiness scores (Stage 5).
+          </p>
+          <DataQualityDashboard />
         </section>
       </main>
     </div>

@@ -1,17 +1,26 @@
 import { getPool } from "./pool";
 import {
+  CanonicalSchema,
   ContextAliasInput,
   ContextDatasetNodeInput,
   ContextEdgeInput,
   ContextEdgeRow,
   ContextEntityInput,
   ContextEntityRow,
+  Correction,
+  CorrectionStatus,
+  CorrectionView,
   Dataset,
   DatasetColumn,
   DatasetRelationshipView,
   DatasetStatus,
   EmbeddableColumn,
+  IssueStatus,
+  QualityIssue,
+  QualityIssueView,
   RawEntityEmbeddingRow,
+  ReadinessScore,
+  ReadinessScoreView,
   SemanticMatch,
 } from "./types";
 
@@ -448,6 +457,339 @@ export async function getContextEntityAliases(
     [contextEntityId]
   );
   return rows;
+}
+
+// ---------- Stage 5: Data Trust & Standardization Engine ----------
+
+// Get datasets grouped by source type for schema derivation
+export async function getDatasetsBySourceType(): Promise<Map<string, Dataset[]>> {
+  const { rows } = await getPool().query<Dataset>(
+    `select * from datasets where source_type is not null order by source_type, file_name`
+  );
+  const grouped = new Map<string, Dataset[]>();
+  for (const row of rows) {
+    const sourceType = row.source_type!;
+    if (!grouped.has(sourceType)) grouped.set(sourceType, []);
+    grouped.get(sourceType)!.push(row);
+  }
+  return grouped;
+}
+
+// Get context entities by type for cross-dataset validation
+export async function getContextEntitiesByType(entityType: string): Promise<ContextEntityRow[]> {
+  const { rows } = await getPool().query<ContextEntityRow>(
+    `select * from context_entities where entity_type = $1 order by canonical_name`,
+    [entityType]
+  );
+  return rows;
+}
+
+// Canonical Schemas
+export async function upsertCanonicalSchema(input: {
+  sourceType: string;
+  semanticRole: string;
+  columnName: string;
+  inferredType: string;
+  isRequired: boolean;
+  frequencyScore: number;
+}): Promise<CanonicalSchema> {
+  const { rows } = await getPool().query<CanonicalSchema>(
+    `insert into canonical_schemas (source_type, semantic_role, column_name, inferred_type, is_required, frequency_score)
+     values ($1, $2, $3, $4, $5, $6)
+     on conflict (source_type, semantic_role) do update set
+       column_name = excluded.column_name,
+       inferred_type = excluded.inferred_type,
+       is_required = excluded.is_required,
+       frequency_score = excluded.frequency_score,
+       updated_at = now()
+     returning *`,
+    [input.sourceType, input.semanticRole, input.columnName, input.inferredType, input.isRequired, input.frequencyScore]
+  );
+  return rows[0];
+}
+
+export async function getCanonicalSchemas(sourceType?: string): Promise<CanonicalSchema[]> {
+  if (sourceType) {
+    const { rows } = await getPool().query<CanonicalSchema>(
+      `select * from canonical_schemas where source_type = $1 order by is_required desc, frequency_score desc`,
+      [sourceType]
+    );
+    return rows;
+  }
+  const { rows } = await getPool().query<CanonicalSchema>(
+    `select * from canonical_schemas order by source_type, is_required desc, frequency_score desc`
+  );
+  return rows;
+}
+
+// Quality Issues
+export async function insertQualityIssue(input: {
+  datasetId: string;
+  columnId?: string;
+  issueType: string;
+  severity: string;
+  title: string;
+  description: string;
+  affectedRows?: number;
+  sampleValues?: unknown[];
+  suggestedFix?: string;
+}): Promise<QualityIssue> {
+  const { rows } = await getPool().query<QualityIssue>(
+    `insert into quality_issues (dataset_id, column_id, issue_type, severity, title, description, affected_rows, sample_values, suggested_fix)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+     returning *`,
+    [
+      input.datasetId,
+      input.columnId ?? null,
+      input.issueType,
+      input.severity,
+      input.title,
+      input.description,
+      input.affectedRows ?? null,
+      input.sampleValues ? JSON.stringify(input.sampleValues) : null,
+      input.suggestedFix ?? null,
+    ]
+  );
+  return rows[0];
+}
+
+export async function getQualityIssues(filters?: {
+  datasetId?: string;
+  status?: IssueStatus;
+  severity?: string;
+}): Promise<QualityIssueView[]> {
+  let query = `
+    select qi.*, d.file_name as dataset_file_name, dc.column_name
+    from quality_issues qi
+    join datasets d on d.id = qi.dataset_id
+    left join dataset_columns dc on dc.id = qi.column_id
+    where 1=1
+  `;
+  const params: unknown[] = [];
+  let paramIdx = 1;
+
+  if (filters?.datasetId) {
+    query += ` and qi.dataset_id = $${paramIdx++}`;
+    params.push(filters.datasetId);
+  }
+  if (filters?.status) {
+    query += ` and qi.status = $${paramIdx++}`;
+    params.push(filters.status);
+  }
+  if (filters?.severity) {
+    query += ` and qi.severity = $${paramIdx++}`;
+    params.push(filters.severity);
+  }
+
+  // Sort by severity (critical first) then by created_at
+  query += ` order by
+    case qi.severity
+      when 'critical' then 1
+      when 'error' then 2
+      when 'warning' then 3
+      when 'info' then 4
+    end,
+    qi.created_at desc`;
+
+  const { rows } = await getPool().query<QualityIssueView>(query, params);
+  return rows;
+}
+
+export async function updateQualityIssueStatus(id: string, status: IssueStatus): Promise<QualityIssue | null> {
+  const { rows } = await getPool().query<QualityIssue>(
+    `update quality_issues set status = $2, updated_at = now() where id = $1 returning *`,
+    [id, status]
+  );
+  return rows[0] ?? null;
+}
+
+export async function clearQualityIssuesForDataset(datasetId: string): Promise<number> {
+  const result = await getPool().query(
+    `delete from quality_issues where dataset_id = $1`,
+    [datasetId]
+  );
+  return result.rowCount ?? 0;
+}
+
+export async function clearAllQualityIssues(): Promise<number> {
+  const result = await getPool().query(`delete from quality_issues`);
+  return result.rowCount ?? 0;
+}
+
+// Corrections
+export async function insertCorrection(input: {
+  issueId?: string;
+  datasetId: string;
+  columnId?: string;
+  correctionType: string;
+  originalValue?: string;
+  correctedValue?: string;
+  affectedRows?: number;
+  confidence: number;
+  reasoning?: string;
+}): Promise<Correction> {
+  const { rows } = await getPool().query<Correction>(
+    `insert into corrections (issue_id, dataset_id, column_id, correction_type, original_value, corrected_value, affected_rows, confidence, reasoning)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+     returning *`,
+    [
+      input.issueId ?? null,
+      input.datasetId,
+      input.columnId ?? null,
+      input.correctionType,
+      input.originalValue ?? null,
+      input.correctedValue ?? null,
+      input.affectedRows ?? null,
+      input.confidence,
+      input.reasoning ?? null,
+    ]
+  );
+  return rows[0];
+}
+
+export async function getCorrections(filters?: {
+  datasetId?: string;
+  status?: CorrectionStatus;
+  issueId?: string;
+}): Promise<CorrectionView[]> {
+  let query = `
+    select c.*, d.file_name as dataset_file_name, dc.column_name, qi.title as issue_title
+    from corrections c
+    join datasets d on d.id = c.dataset_id
+    left join dataset_columns dc on dc.id = c.column_id
+    left join quality_issues qi on qi.id = c.issue_id
+    where 1=1
+  `;
+  const params: unknown[] = [];
+  let paramIdx = 1;
+
+  if (filters?.datasetId) {
+    query += ` and c.dataset_id = $${paramIdx++}`;
+    params.push(filters.datasetId);
+  }
+  if (filters?.status) {
+    query += ` and c.status = $${paramIdx++}`;
+    params.push(filters.status);
+  }
+  if (filters?.issueId) {
+    query += ` and c.issue_id = $${paramIdx++}`;
+    params.push(filters.issueId);
+  }
+
+  query += ` order by c.confidence desc, c.created_at desc`;
+
+  const { rows } = await getPool().query<CorrectionView>(query, params);
+  return rows;
+}
+
+export async function approveCorrection(id: string, approvedBy?: string): Promise<Correction | null> {
+  const { rows } = await getPool().query<Correction>(
+    `update corrections set status = 'approved', approved_by = $2, approved_at = now(), updated_at = now()
+     where id = $1 returning *`,
+    [id, approvedBy ?? null]
+  );
+  return rows[0] ?? null;
+}
+
+export async function rejectCorrection(id: string): Promise<Correction | null> {
+  const { rows } = await getPool().query<Correction>(
+    `update corrections set status = 'rejected', updated_at = now() where id = $1 returning *`,
+    [id]
+  );
+  return rows[0] ?? null;
+}
+
+export async function bulkApproveCorrections(ids: string[], approvedBy?: string): Promise<number> {
+  const result = await getPool().query(
+    `update corrections set status = 'approved', approved_by = $2, approved_at = now(), updated_at = now()
+     where id = any($1::uuid[]) and status = 'pending'`,
+    [ids, approvedBy ?? null]
+  );
+  return result.rowCount ?? 0;
+}
+
+export async function markCorrectionApplied(id: string): Promise<Correction | null> {
+  const { rows } = await getPool().query<Correction>(
+    `update corrections set status = 'applied', applied_at = now(), updated_at = now()
+     where id = $1 and status = 'approved' returning *`,
+    [id]
+  );
+  return rows[0] ?? null;
+}
+
+export async function clearCorrectionsForDataset(datasetId: string): Promise<number> {
+  const result = await getPool().query(
+    `delete from corrections where dataset_id = $1`,
+    [datasetId]
+  );
+  return result.rowCount ?? 0;
+}
+
+export async function clearAllCorrections(): Promise<number> {
+  const result = await getPool().query(`delete from corrections`);
+  return result.rowCount ?? 0;
+}
+
+// Readiness Scores
+export async function upsertReadinessScore(input: {
+  datasetId: string;
+  overallScore: number;
+  completenessScore: number;
+  validityScore: number;
+  consistencyScore: number;
+  uniquenessScore: number;
+  issueCount: number;
+  criticalIssueCount: number;
+  recommendations?: string[];
+}): Promise<ReadinessScore> {
+  const { rows } = await getPool().query<ReadinessScore>(
+    `insert into readiness_scores (dataset_id, overall_score, completeness_score, validity_score, consistency_score, uniqueness_score, issue_count, critical_issue_count, recommendations)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+     on conflict (dataset_id) do update set
+       overall_score = excluded.overall_score,
+       completeness_score = excluded.completeness_score,
+       validity_score = excluded.validity_score,
+       consistency_score = excluded.consistency_score,
+       uniqueness_score = excluded.uniqueness_score,
+       issue_count = excluded.issue_count,
+       critical_issue_count = excluded.critical_issue_count,
+       recommendations = excluded.recommendations,
+       updated_at = now()
+     returning *`,
+    [
+      input.datasetId,
+      input.overallScore,
+      input.completenessScore,
+      input.validityScore,
+      input.consistencyScore,
+      input.uniquenessScore,
+      input.issueCount,
+      input.criticalIssueCount,
+      input.recommendations ? JSON.stringify(input.recommendations) : null,
+    ]
+  );
+  return rows[0];
+}
+
+export async function getReadinessScores(): Promise<ReadinessScoreView[]> {
+  const { rows } = await getPool().query<ReadinessScoreView>(
+    `select rs.*, d.file_name as dataset_file_name, d.source_type
+     from readiness_scores rs
+     join datasets d on d.id = rs.dataset_id
+     order by rs.overall_score desc`
+  );
+  return rows;
+}
+
+export async function getReadinessScore(datasetId: string): Promise<ReadinessScoreView | null> {
+  const { rows } = await getPool().query<ReadinessScoreView>(
+    `select rs.*, d.file_name as dataset_file_name, d.source_type
+     from readiness_scores rs
+     join datasets d on d.id = rs.dataset_id
+     where rs.dataset_id = $1`,
+    [datasetId]
+  );
+  return rows[0] ?? null;
 }
 
 // Bounded-depth traversal from a single entity, treating edges as undirected

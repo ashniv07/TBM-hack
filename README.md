@@ -80,20 +80,41 @@ Invoice
 
 This contextual understanding enables more accurate reasoning throughout the pipeline.
 
-### Stage 5 — Data Trust & Standardization Engine
-The platform standardizes and validates enterprise data.
+### Stage 5 — Data Trust & Standardization Engine *(implemented)*
+The platform standardizes and validates enterprise data across all datasets.
 
-Capabilities include:
-- **Schema Standardization** — column normalization, canonical schema generation
-- **Value Standardization** — vendor names, service names, department names, cost center names
-- **Data Cleaning** — missing values, duplicate records, invalid references, orphan records, inconsistent hierarchies, invalid currencies, invalid dates, outlier detection
+**Canonical Schema Derivation:**
+- Analyzes all datasets grouped by source type
+- Derives canonical schemas based on semantic role frequency
+- Marks columns as "required" if present in 80%+ of datasets of that type
 
-AI recommends possible fixes for detected issues.
+**Quality Issue Detection:**
+- `missing_value` — High null percentage (>50%)
+- `duplicate` — Duplicate rows based on key columns
+- `invalid_reference` — Entity not found in knowledge graph
+- `invalid_currency` — Invalid ISO 4217 currency codes
+- `invalid_date` — Unparseable date formats
+- `outlier` — Values >3 standard deviations from mean
+- `schema_mismatch` — Column type differs from canonical schema
+
+**AI-Powered Corrections:**
+- GPT-4o-mini generates correction suggestions (with heuristic fallback)
+- Approval workflow: `pending` → `approved` → `applied`
+- Safe mode: Creates new corrected file, never modifies original
+- Supported corrections: date normalization, currency standardization, entity matching, whitespace trimming
+
+**TBM Readiness Scoring:**
+- Four dimensions weighted:
+  - Completeness (25%): Required columns present vs canonical schema
+  - Validity (30%): % values passing validation
+  - Consistency (25%): Cross-dataset reference integrity
+  - Uniqueness (20%): Duplicate ratio
+- Generates prioritized recommendations per dataset
 
 The platform generates:
-- Data Quality Report
-- TBM Readiness Score
-- Recommended Corrections
+- Data Quality Report with issue breakdown
+- TBM Readiness Score per dataset
+- Recommended Corrections with confidence scores
 
 ### Stage 6 — AI-Assisted ATUM Mapping
 Using the Enterprise Context Model, embeddings, Retrieval-Augmented Generation (RAG), the ATUM Knowledge Base, and business rules, the platform automatically maps client-specific terminology into standardized ATUM categories.
@@ -159,3 +180,45 @@ Open http://localhost:5173, drag in one or more `.xlsx` files. Each upload autom
 through ingestion → understanding → embedding, and results appear in the Dataset Catalog, the
 per-dataset detail view (columns, semantic roles, discovered relationships), and the Semantic
 Matches panel.
+
+### Using Stage 5 — Data Quality & Standardization
+
+After uploading datasets and running Stages 1-4:
+
+1. Scroll to **"Data Quality & TBM Readiness"** section
+2. Click **"Run Data Quality Analysis"** to analyze all datasets
+3. Review the four tabs:
+   - **Overview**: Summary cards, issues by type/severity, datasets needing attention
+   - **Issues**: Detected quality problems with status workflow (Open → Acknowledged → Resolved)
+   - **Corrections**: AI-proposed fixes with approval workflow
+   - **Readiness**: TBM readiness scores per dataset with 4-dimension breakdown
+
+4. To apply corrections:
+   - Review proposed corrections in the Corrections tab
+   - Approve corrections individually or use bulk approve
+   - Click **"Apply All Approved Corrections"**
+   - A new corrected file is created (original file is never modified)
+   - View summary of changes applied
+
+### API Endpoints
+
+**Stages 1-4:**
+- `POST /api/datasets/upload` — Batch Excel upload (runs Stages 1-3)
+- `POST /api/context/rebuild` — Rebuild knowledge graph (Stage 4)
+- `GET /api/context/graph` — Fetch full knowledge graph
+- `GET /api/entities/matches` — Semantic entity matches
+
+**Stage 5 — Standardization:**
+- `POST /api/standardization/run` — Run full Stage 5 pipeline
+- `GET /api/standardization/schemas` — List canonical schemas
+- `GET /api/standardization/issues` — List quality issues (filterable)
+- `PATCH /api/standardization/issues/:id/status` — Update issue status
+- `GET /api/standardization/corrections` — List corrections (filterable)
+- `POST /api/standardization/corrections/:id/approve` — Approve correction
+- `POST /api/standardization/corrections/:id/reject` — Reject correction
+- `POST /api/standardization/corrections/bulk-approve` — Batch approve
+- `POST /api/standardization/apply/:datasetId` — Apply corrections to dataset (safe mode)
+- `POST /api/standardization/apply-all` — Apply all approved corrections
+- `GET /api/standardization/readiness` — List all readiness scores
+- `GET /api/standardization/readiness/:datasetId` — Single dataset score
+- `GET /api/standardization/report` — Full data quality report
