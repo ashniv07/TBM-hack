@@ -6,3 +6,5 @@ build/
 *.log
 storage/uploads/
 .DS_Store
+.claude
+claude.md

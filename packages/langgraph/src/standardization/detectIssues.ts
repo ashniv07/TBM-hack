@@ -1,0 +1,281 @@
+import path from "path";
+import {
+  getDatasetColumns,
+  getContextEntitiesByType,
+  listDatasets,
+  getDataset,
+  ContextEntityRow,
+} from "@tbm/db";
+import { readWorkbookRows } from "../shared/readWorkbookRows";
+import { StandardizationState, DetectedIssue, DerivedSchema } from "./state";
+
+// Valid ISO 4217 currency codes (common subset)
+const VALID_CURRENCIES = new Set([
+  "USD", "EUR", "GBP", "JPY", "CNY", "INR", "CAD", "AUD", "CHF", "NZD",
+  "HKD", "SGD", "KRW", "MXN", "BRL", "ZAR", "SEK", "NOK", "DKK", "PLN",
+]);
+
+// Columns with semantic roles that should reference entities in the knowledge graph
+const REFERENCE_ROLES = [
+  "vendor", "application", "service", "business_unit", "department",
+  "cost_center", "cloud_resource", "cloud_provider", "infrastructure_asset", "project",
+];
+
+/**
+ * Detects quality issues across all datasets.
+ * Issue types:
+ * - missing_value: High null percentage (>50%)
+ * - duplicate: Duplicate rows based on key columns
+ * - invalid_reference: Entity not found in knowledge graph
+ * - invalid_currency: Invalid currency codes
+ * - invalid_date: Unparseable dates
+ * - outlier: Values >3 std deviations from mean
+ * - schema_mismatch: Column type differs from canonical schema
+ */
+export async function detectIssuesNode(state: StandardizationState): Promise<Partial<StandardizationState>> {
+  if (state.error) return {};
+
+  try {
+    const datasets = await listDatasets();
+    const issues: DetectedIssue[] = [];
+
+    // Build canonical schema lookup
+    const schemaBySourceRole = new Map<string, DerivedSchema>();
+    for (const schema of state.schemas ?? []) {
+      schemaBySourceRole.set(`${schema.sourceType}::${schema.semanticRole}`, schema);
+    }
+
+    // Cache context entities by type for reference validation
+    const entityCacheByType = new Map<string, Set<string>>();
+    async function getEntityNames(entityType: string): Promise<Set<string>> {
+      if (!entityCacheByType.has(entityType)) {
+        const entities = await getContextEntitiesByType(entityType);
+        const names = new Set(entities.map((e) => e.canonical_name.toLowerCase().trim()));
+        entityCacheByType.set(entityType, names);
+      }
+      return entityCacheByType.get(entityType)!;
+    }
+
+    for (const dataset of datasets) {
+      const columns = await getDatasetColumns(dataset.id);
+
+      // Load rows for detailed analysis
+      let rows: Record<string, unknown>[] = [];
+      try {
+        const candidatePaths = [dataset.storage_path];
+        if (state.uploadsDir) {
+          candidatePaths.push(path.join(state.uploadsDir, path.basename(dataset.storage_path)));
+        }
+        for (const candidatePath of candidatePaths) {
+          try {
+            const result = await readWorkbookRows(candidatePath);
+            rows = result.rows;
+            break;
+          } catch {
+            // Try next path
+          }
+        }
+      } catch {
+        // If we can't read the file, skip row-level analysis
+      }
+
+      // Check each column for issues
+      for (const col of columns) {
+        // 1. Missing value detection (from profiling data)
+        if (col.null_pct !== null && col.null_pct > 50) {
+          issues.push({
+            datasetId: dataset.id,
+            columnId: col.id,
+            issueType: "missing_value",
+            severity: col.null_pct > 80 ? "error" : "warning",
+            title: `High null percentage in ${col.column_name}`,
+            description: `Column "${col.column_name}" has ${col.null_pct.toFixed(1)}% null values, which may indicate data quality issues or missing data collection.`,
+            affectedRows: rows.length > 0 ? Math.round(rows.length * col.null_pct / 100) : undefined,
+            suggestedFix: col.null_pct > 80
+              ? "Consider removing this column or investigating why data is missing"
+              : "Review data collection process to reduce null values",
+          });
+        }
+
+        // 2. Schema mismatch detection
+        if (dataset.source_type && col.semantic_role) {
+          const canonical = schemaBySourceRole.get(`${dataset.source_type}::${col.semantic_role}`);
+          if (canonical && canonical.inferredType !== col.inferred_type) {
+            issues.push({
+              datasetId: dataset.id,
+              columnId: col.id,
+              issueType: "schema_mismatch",
+              severity: "warning",
+              title: `Type mismatch for ${col.column_name}`,
+              description: `Column "${col.column_name}" has type "${col.inferred_type}" but canonical schema expects "${canonical.inferredType}" for ${col.semantic_role} in ${dataset.source_type} datasets.`,
+              suggestedFix: `Convert column values to ${canonical.inferredType} type`,
+            });
+          }
+        }
+
+        // Row-level analysis (only if we have rows)
+        if (rows.length === 0) continue;
+
+        // 3. Currency validation (for amount/currency columns)
+        if (col.semantic_role === "currency" || col.column_name.toLowerCase().includes("currency")) {
+          const invalidCurrencies: string[] = [];
+          for (const row of rows) {
+            const value = row[col.column_name];
+            if (value === null || value === undefined) continue;
+            const code = String(value).trim().toUpperCase();
+            if (code && !VALID_CURRENCIES.has(code)) {
+              if (!invalidCurrencies.includes(code)) {
+                invalidCurrencies.push(code);
+              }
+            }
+          }
+          if (invalidCurrencies.length > 0) {
+            issues.push({
+              datasetId: dataset.id,
+              columnId: col.id,
+              issueType: "invalid_currency",
+              severity: "error",
+              title: `Invalid currency codes in ${col.column_name}`,
+              description: `Found ${invalidCurrencies.length} invalid currency code(s) that don't match ISO 4217 standard.`,
+              sampleValues: invalidCurrencies.slice(0, 5),
+              suggestedFix: "Normalize currency codes to ISO 4217 standard (e.g., USD, EUR, GBP)",
+            });
+          }
+        }
+
+        // 4. Date validation (for date columns)
+        if (col.inferred_type === "date" || col.column_name.toLowerCase().includes("date")) {
+          const invalidDates: string[] = [];
+          for (const row of rows) {
+            const value = row[col.column_name];
+            if (value === null || value === undefined || value === "") continue;
+            // Skip if already a valid ISO date string or Date object
+            if (value instanceof Date) continue;
+            const strValue = String(value);
+            const parsed = Date.parse(strValue);
+            if (isNaN(parsed)) {
+              if (!invalidDates.includes(strValue) && invalidDates.length < 10) {
+                invalidDates.push(strValue);
+              }
+            }
+          }
+          if (invalidDates.length > 0) {
+            issues.push({
+              datasetId: dataset.id,
+              columnId: col.id,
+              issueType: "invalid_date",
+              severity: "warning",
+              title: `Unparseable dates in ${col.column_name}`,
+              description: `Found values that cannot be parsed as valid dates.`,
+              sampleValues: invalidDates.slice(0, 5),
+              suggestedFix: "Normalize date values to ISO 8601 format (YYYY-MM-DD)",
+            });
+          }
+        }
+
+        // 5. Numeric outlier detection (for numeric columns)
+        if (col.inferred_type === "number" || col.inferred_type === "integer") {
+          const values: number[] = [];
+          for (const row of rows) {
+            const value = row[col.column_name];
+            if (value === null || value === undefined) continue;
+            const num = typeof value === "number" ? value : parseFloat(String(value));
+            if (!isNaN(num)) values.push(num);
+          }
+
+          if (values.length > 10) {
+            const mean = values.reduce((a, b) => a + b, 0) / values.length;
+            const variance = values.reduce((sum, v) => sum + Math.pow(v - mean, 2), 0) / values.length;
+            const stdDev = Math.sqrt(variance);
+
+            if (stdDev > 0) {
+              const outliers = values.filter((v) => Math.abs(v - mean) > 3 * stdDev);
+              if (outliers.length > 0) {
+                issues.push({
+                  datasetId: dataset.id,
+                  columnId: col.id,
+                  issueType: "outlier",
+                  severity: "info",
+                  title: `Outliers detected in ${col.column_name}`,
+                  description: `Found ${outliers.length} value(s) more than 3 standard deviations from the mean (${mean.toFixed(2)} ± ${stdDev.toFixed(2)}).`,
+                  affectedRows: outliers.length,
+                  sampleValues: outliers.slice(0, 5),
+                  suggestedFix: "Review outlier values to determine if they are data entry errors or valid extreme values",
+                });
+              }
+            }
+          }
+        }
+
+        // 6. Invalid reference detection (for entity reference columns)
+        if (col.semantic_role && REFERENCE_ROLES.includes(col.semantic_role)) {
+          const knownEntities = await getEntityNames(col.semantic_role);
+          if (knownEntities.size > 0) {
+            const unknownValues: string[] = [];
+            for (const row of rows) {
+              const value = row[col.column_name];
+              if (value === null || value === undefined || value === "") continue;
+              const strValue = String(value).toLowerCase().trim();
+              if (!knownEntities.has(strValue)) {
+                if (!unknownValues.includes(String(value)) && unknownValues.length < 20) {
+                  unknownValues.push(String(value));
+                }
+              }
+            }
+            if (unknownValues.length > 0) {
+              issues.push({
+                datasetId: dataset.id,
+                columnId: col.id,
+                issueType: "invalid_reference",
+                severity: "warning",
+                title: `Unknown ${col.semantic_role} references in ${col.column_name}`,
+                description: `Found ${unknownValues.length} value(s) not found in the knowledge graph as known ${col.semantic_role} entities.`,
+                sampleValues: unknownValues.slice(0, 5),
+                suggestedFix: `Add missing ${col.semantic_role} entities to the knowledge graph or correct the values`,
+              });
+            }
+          }
+        }
+      }
+
+      // 7. Duplicate row detection (based on candidate key columns)
+      const keyColumns = columns.filter((c) => c.is_candidate_key);
+      if (keyColumns.length > 0 && rows.length > 0) {
+        const seen = new Map<string, number>();
+        let duplicateCount = 0;
+        const duplicateExamples: string[] = [];
+
+        for (const row of rows) {
+          const keyValues = keyColumns.map((c) => String(row[c.column_name] ?? "")).join("|");
+          const count = (seen.get(keyValues) ?? 0) + 1;
+          seen.set(keyValues, count);
+          if (count === 2) {
+            duplicateCount++;
+            if (duplicateExamples.length < 5) {
+              duplicateExamples.push(keyValues);
+            }
+          } else if (count > 2) {
+            duplicateCount++;
+          }
+        }
+
+        if (duplicateCount > 0) {
+          issues.push({
+            datasetId: dataset.id,
+            issueType: "duplicate",
+            severity: duplicateCount > rows.length * 0.1 ? "error" : "warning",
+            title: `Duplicate rows detected`,
+            description: `Found ${duplicateCount} duplicate row(s) based on key column(s): ${keyColumns.map((c) => c.column_name).join(", ")}.`,
+            affectedRows: duplicateCount,
+            sampleValues: duplicateExamples,
+            suggestedFix: "Review and remove duplicate rows or adjust key column selection",
+          });
+        }
+      }
+    }
+
+    return { issues };
+  } catch (err) {
+    return { error: `Failed to detect issues: ${err instanceof Error ? err.message : String(err)}` };
+  }
+}

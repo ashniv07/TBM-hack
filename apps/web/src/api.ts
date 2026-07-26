@@ -184,3 +184,244 @@ export async function fetchContextTrace(entityId: string, depth = 6): Promise<Co
   if (!res.ok) throw new Error(`Failed to fetch trace: ${res.statusText}`);
   return res.json();
 }
+
+// ---------- Stage 5: Data Trust & Standardization Engine ----------
+
+export interface CanonicalSchema {
+  id: string;
+  source_type: string;
+  semantic_role: string;
+  column_name: string;
+  inferred_type: string;
+  is_required: boolean;
+  frequency_score: number;
+}
+
+export interface QualityIssue {
+  id: string;
+  dataset_id: string;
+  column_id: string | null;
+  issue_type: string;
+  severity: "info" | "warning" | "error" | "critical";
+  status: "open" | "acknowledged" | "resolved" | "ignored";
+  title: string;
+  description: string;
+  affected_rows: number | null;
+  sample_values: unknown[] | null;
+  suggested_fix: string | null;
+  dataset_file_name: string;
+  column_name: string | null;
+}
+
+export interface Correction {
+  id: string;
+  issue_id: string | null;
+  dataset_id: string;
+  column_id: string | null;
+  correction_type: string;
+  status: "pending" | "approved" | "rejected" | "applied";
+  original_value: string | null;
+  corrected_value: string | null;
+  affected_rows: number | null;
+  confidence: number;
+  reasoning: string | null;
+  dataset_file_name: string;
+  column_name: string | null;
+  issue_title: string | null;
+}
+
+export interface ReadinessScore {
+  id: string;
+  dataset_id: string;
+  overall_score: number;
+  completeness_score: number;
+  validity_score: number;
+  consistency_score: number;
+  uniqueness_score: number;
+  issue_count: number;
+  critical_issue_count: number;
+  recommendations: string[] | null;
+  dataset_file_name: string;
+  source_type: string | null;
+}
+
+export interface StandardizationStats {
+  schemasCount: number;
+  issuesCount: number;
+  correctionsCount: number;
+  datasetsScored: number;
+  averageReadinessScore: number;
+}
+
+export interface StandardizationRunResult {
+  ok: boolean;
+  stats: StandardizationStats;
+}
+
+export interface DataQualityReport {
+  summary: {
+    totalSchemas: number;
+    totalIssues: number;
+    criticalIssues: number;
+    openIssues: number;
+    pendingCorrections: number;
+    datasetsScored: number;
+    averageReadinessScore: number;
+  };
+  issuesByType: Record<string, number>;
+  issuesBySeverity: Record<string, number>;
+  datasetsNeedingAttention: {
+    datasetId: string;
+    fileName: string;
+    overallScore: number;
+    recommendations: string[] | null;
+  }[];
+  schemas: CanonicalSchema[];
+  recentIssues: QualityIssue[];
+  recentCorrections: Correction[];
+}
+
+export async function runStandardization(): Promise<StandardizationRunResult> {
+  const res = await fetch(`${API_BASE}/standardization/run`, { method: "POST" });
+  if (!res.ok) throw new Error(`Failed to run standardization: ${res.statusText}`);
+  return res.json();
+}
+
+export async function fetchCanonicalSchemas(sourceType?: string): Promise<CanonicalSchema[]> {
+  const url = sourceType
+    ? `${API_BASE}/standardization/schemas?sourceType=${encodeURIComponent(sourceType)}`
+    : `${API_BASE}/standardization/schemas`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Failed to fetch schemas: ${res.statusText}`);
+  const data = await res.json();
+  return data.schemas;
+}
+
+export async function fetchQualityIssues(filters?: {
+  datasetId?: string;
+  status?: string;
+  severity?: string;
+}): Promise<QualityIssue[]> {
+  const params = new URLSearchParams();
+  if (filters?.datasetId) params.set("datasetId", filters.datasetId);
+  if (filters?.status) params.set("status", filters.status);
+  if (filters?.severity) params.set("severity", filters.severity);
+
+  const url = `${API_BASE}/standardization/issues${params.toString() ? `?${params}` : ""}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Failed to fetch issues: ${res.statusText}`);
+  const data = await res.json();
+  return data.issues;
+}
+
+export async function updateIssueStatus(id: string, status: string): Promise<QualityIssue> {
+  const res = await fetch(`${API_BASE}/standardization/issues/${id}/status`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status }),
+  });
+  if (!res.ok) throw new Error(`Failed to update issue: ${res.statusText}`);
+  const data = await res.json();
+  return data.issue;
+}
+
+export async function fetchCorrections(filters?: {
+  datasetId?: string;
+  status?: string;
+}): Promise<Correction[]> {
+  const params = new URLSearchParams();
+  if (filters?.datasetId) params.set("datasetId", filters.datasetId);
+  if (filters?.status) params.set("status", filters.status);
+
+  const url = `${API_BASE}/standardization/corrections${params.toString() ? `?${params}` : ""}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Failed to fetch corrections: ${res.statusText}`);
+  const data = await res.json();
+  return data.corrections;
+}
+
+export async function approveCorrection(id: string): Promise<Correction> {
+  const res = await fetch(`${API_BASE}/standardization/corrections/${id}/approve`, { method: "POST" });
+  if (!res.ok) throw new Error(`Failed to approve correction: ${res.statusText}`);
+  const data = await res.json();
+  return data.correction;
+}
+
+export async function rejectCorrection(id: string): Promise<Correction> {
+  const res = await fetch(`${API_BASE}/standardization/corrections/${id}/reject`, { method: "POST" });
+  if (!res.ok) throw new Error(`Failed to reject correction: ${res.statusText}`);
+  const data = await res.json();
+  return data.correction;
+}
+
+export async function bulkApproveCorrections(ids: string[]): Promise<number> {
+  const res = await fetch(`${API_BASE}/standardization/corrections/bulk-approve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids }),
+  });
+  if (!res.ok) throw new Error(`Failed to bulk approve: ${res.statusText}`);
+  const data = await res.json();
+  return data.approved;
+}
+
+export async function applyCorrection(id: string): Promise<Correction> {
+  const res = await fetch(`${API_BASE}/standardization/corrections/${id}/apply`, { method: "POST" });
+  if (!res.ok) throw new Error(`Failed to apply correction: ${res.statusText}`);
+  const data = await res.json();
+  return data.correction;
+}
+
+export async function fetchReadinessScores(): Promise<ReadinessScore[]> {
+  const res = await fetch(`${API_BASE}/standardization/readiness`);
+  if (!res.ok) throw new Error(`Failed to fetch readiness scores: ${res.statusText}`);
+  const data = await res.json();
+  return data.scores;
+}
+
+export async function fetchReadinessScore(datasetId: string): Promise<ReadinessScore> {
+  const res = await fetch(`${API_BASE}/standardization/readiness/${datasetId}`);
+  if (!res.ok) throw new Error(`Failed to fetch readiness score: ${res.statusText}`);
+  const data = await res.json();
+  return data.score;
+}
+
+export async function fetchDataQualityReport(): Promise<DataQualityReport> {
+  const res = await fetch(`${API_BASE}/standardization/report`);
+  if (!res.ok) throw new Error(`Failed to fetch report: ${res.statusText}`);
+  return res.json();
+}
+
+export interface ApplyCorrectionChange {
+  correctionId: string;
+  columnName: string;
+  originalValue: string;
+  correctedValue: string;
+  rowsAffected: number;
+}
+
+export interface ApplyCorrectionsResult {
+  ok: boolean;
+  originalFile: string;
+  correctedFile: string;
+  correctionsApplied: number;
+  changes: ApplyCorrectionChange[];
+}
+
+export interface ApplyAllCorrectionsResult {
+  ok: boolean;
+  results: ApplyCorrectionsResult[];
+  errors: { datasetId: string; error: string }[];
+}
+
+export async function applyCorrectionsToDataset(datasetId: string): Promise<ApplyCorrectionsResult> {
+  const res = await fetch(`${API_BASE}/standardization/apply/${datasetId}`, { method: "POST" });
+  if (!res.ok) throw new Error(`Failed to apply corrections: ${res.statusText}`);
+  return res.json();
+}
+
+export async function applyAllCorrections(): Promise<ApplyAllCorrectionsResult> {
+  const res = await fetch(`${API_BASE}/standardization/apply-all`, { method: "POST" });
+  if (!res.ok) throw new Error(`Failed to apply all corrections: ${res.statusText}`);
+  return res.json();
+}

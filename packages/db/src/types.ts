@@ -139,3 +139,103 @@ export interface ContextEdgeRow {
   created_at: string;
   updated_at: string;
 }
+
+// ---------- Stage 5: Data Trust & Standardization Engine ----------
+
+export type IssueSeverity = "info" | "warning" | "error" | "critical";
+export type IssueStatus = "open" | "acknowledged" | "resolved" | "ignored";
+export type IssueType =
+  | "missing_value"
+  | "duplicate"
+  | "invalid_reference"
+  | "invalid_currency"
+  | "invalid_date"
+  | "outlier"
+  | "schema_mismatch";
+
+export type CorrectionStatus = "pending" | "approved" | "rejected" | "applied";
+export type CorrectionType =
+  | "normalize_date"
+  | "normalize_currency"
+  | "fuzzy_match_entity"
+  | "trim_whitespace"
+  | "fill_missing"
+  | "remove_duplicate";
+
+export interface CanonicalSchema {
+  id: string;
+  source_type: string;
+  semantic_role: string;
+  column_name: string;
+  inferred_type: string;
+  is_required: boolean;
+  frequency_score: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface QualityIssue {
+  id: string;
+  dataset_id: string;
+  column_id: string | null;
+  issue_type: IssueType;
+  severity: IssueSeverity;
+  status: IssueStatus;
+  title: string;
+  description: string;
+  affected_rows: number | null;
+  sample_values: unknown[] | null;
+  suggested_fix: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface QualityIssueView extends QualityIssue {
+  dataset_file_name: string;
+  column_name: string | null;
+}
+
+export interface Correction {
+  id: string;
+  issue_id: string | null;
+  dataset_id: string;
+  column_id: string | null;
+  correction_type: CorrectionType;
+  status: CorrectionStatus;
+  original_value: string | null;
+  corrected_value: string | null;
+  affected_rows: number | null;
+  confidence: number;
+  reasoning: string | null;
+  approved_by: string | null;
+  approved_at: string | null;
+  applied_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CorrectionView extends Correction {
+  dataset_file_name: string;
+  column_name: string | null;
+  issue_title: string | null;
+}
+
+export interface ReadinessScore {
+  id: string;
+  dataset_id: string;
+  overall_score: number;
+  completeness_score: number;
+  validity_score: number;
+  consistency_score: number;
+  uniqueness_score: number;
+  issue_count: number;
+  critical_issue_count: number;
+  recommendations: string[] | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ReadinessScoreView extends ReadinessScore {
+  dataset_file_name: string;
+  source_type: string | null;
+}
