@@ -425,3 +425,72 @@ export async function applyAllCorrections(): Promise<ApplyAllCorrectionsResult> 
   if (!res.ok) throw new Error(`Failed to apply all corrections: ${res.statusText}`);
   return res.json();
 }
+
+// ---------- Stage 6: ATUM Mapping ----------
+
+export type AtumLayer = "cost_pool" | "resource_tower" | "solution";
+
+export interface AtumTaxonomyItem {
+  id: string; layer: AtumLayer; path: string; level_1: string;
+  level_2: string | null; level_3: string | null;
+}
+
+export interface AtumMapping {
+  id: string; dataset_id: string; dataset_file_name: string; column_name: string;
+  semantic_role: string | null; source_value: string; layer: AtumLayer;
+  category_id: string | null; category_path: string | null;
+  level_1: string | null; level_2: string | null; level_3: string | null;
+  status: "suggested" | "approved" | "rejected" | "overridden" | "unresolved";
+  confidence: number; method: string; reasoning: string | null;
+  source_context: Record<string, string | number> | null;
+  alternatives: { categoryId: string; path: string; confidence: number }[] | null;
+}
+
+export interface AtumReport {
+  total: number; classified: number; coverage: number; averageConfidence: number;
+  byStatus: Record<string, number>; byTower: Record<string, number>;
+}
+
+export async function importAtumTaxonomy() {
+  const res = await fetch(`${API_BASE}/atum/taxonomy/import`, { method: "POST" });
+  if (!res.ok) throw new Error((await res.json()).error ?? "Taxonomy import failed");
+  return res.json() as Promise<{ ok: boolean; imported: number; active: number; retired: number; embeddingSource: string }>;
+}
+
+export async function runAtumMapping(layer: AtumLayer, useLlm = false) {
+  const res = await fetch(`${API_BASE}/atum/run`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ layer, useLlm }),
+  });
+  if (!res.ok) throw new Error((await res.json()).error ?? "ATUM mapping failed");
+  return res.json() as Promise<{ ok: boolean; stats: {
+    candidates: number; mapped: number; autoMapped: number; needsReview: number; unresolved: number;
+    skippedDatasets: string[]; embeddingSource: string;
+  } }>;
+}
+
+export async function fetchAtumMappings(layer?: AtumLayer): Promise<AtumMapping[]> {
+  const res = await fetch(`${API_BASE}/atum/mappings${layer ? `?layer=${layer}` : ""}`);
+  if (!res.ok) throw new Error("Failed to fetch ATUM mappings");
+  return (await res.json()).mappings;
+}
+
+export async function fetchAtumTaxonomy(layer: AtumLayer): Promise<AtumTaxonomyItem[]> {
+  const res = await fetch(`${API_BASE}/atum/taxonomy?layer=${layer}`);
+  if (!res.ok) throw new Error("Failed to fetch ATUM taxonomy");
+  return (await res.json()).items;
+}
+
+export async function fetchAtumReport(): Promise<AtumReport> {
+  const res = await fetch(`${API_BASE}/atum/report`);
+  if (!res.ok) throw new Error("Failed to fetch ATUM report");
+  return res.json();
+}
+
+export async function reviewAtumMapping(id: string, action: "approve" | "reject", categoryId?: string) {
+  const endpoint = categoryId ? "override" : action;
+  const res = await fetch(`${API_BASE}/atum/mappings/${id}/${endpoint}`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ categoryId }),
+  });
+  if (!res.ok) throw new Error("Failed to review ATUM mapping");
+  return res.json();
+}

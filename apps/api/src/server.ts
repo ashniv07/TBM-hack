@@ -9,6 +9,7 @@ import { datasetsRouter } from "./routes/datasets";
 import { entitiesRouter } from "./routes/entities";
 import { contextRouter } from "./routes/context";
 import { standardizationRouter } from "./routes/standardization";
+import { atumRouter } from "./routes/atum";
 
 const app = express();
 app.use(cors());
@@ -19,6 +20,7 @@ app.use("/api/datasets", datasetsRouter);
 app.use("/api/entities", entitiesRouter);
 app.use("/api/context", contextRouter);
 app.use("/api/standardization", standardizationRouter);
+app.use("/api/atum", atumRouter);
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 4000;
 app.listen(PORT, () => {

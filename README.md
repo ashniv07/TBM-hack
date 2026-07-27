@@ -129,6 +129,16 @@ Generated output includes:
 
 Low-confidence mappings are routed to consultants for review.
 
+**Implemented with TBM Taxonomy v5.0.1:**
+- Imports the official Cost Pool, Technology Resource Tower, and Technology Solution worksheets
+- Excludes retired taxonomy entries from candidate retrieval while retaining them for auditability
+- Builds deduplicated row context from vendor, description, application, account, product, resource, and asset fields
+- Retrieves only real taxonomy categories with pgvector; the model cannot invent category names
+- Combines embedding similarity, lexical evidence, semantic role, and optional GPT-4o-mini selection
+- Auto-approves mappings at 85%+ confidence and routes lower-confidence suggestions for review
+- Supports approve, reject, and manual override actions with reviewer timestamps
+- Stores alternatives, evidence, method, confidence, and taxonomy version for every result
+
 ### Stage 7 — TBM Data Model Generation
 The validated and standardized datasets are transformed into an Apptio-ready TBM data model. Relationships between cost centers, business units, applications, cloud resources, vendors, and financial transactions are preserved, enabling accurate financial modeling within IBM Apptio.
 
@@ -181,6 +191,18 @@ through ingestion → understanding → embedding, and results appear in the Dat
 per-dataset detail view (columns, semantic roles, discovered relationships), and the Semantic
 Matches panel.
 
+### Using Stage 6 — ATUM Mapping
+
+1. Complete Stages 1-5 and rebuild the Enterprise Context Model.
+2. Open **ATUM Mapping** and click **Import Taxonomy** once. This imports
+   `packages/langgraph/data/TBM-Taxonomy-v5.0.1-Data-Table.xlsx`.
+3. Select Resource Towers, Cost Pools, or Technology Solutions.
+4. Click **Run ATUM Mapping**.
+5. Review suggested and unresolved mappings; approve, reject, or override them with an official category.
+
+With `OPENAI_API_KEY`, GPT-4o-mini chooses only among the five retrieved official categories. Without a key,
+the pipeline remains functional using deterministic embeddings and keyword scoring, but semantic accuracy is limited.
+
 ### Using Stage 5 — Data Quality & Standardization
 
 After uploading datasets and running Stages 1-4:
@@ -222,3 +244,13 @@ After uploading datasets and running Stages 1-4:
 - `GET /api/standardization/readiness` — List all readiness scores
 - `GET /api/standardization/readiness/:datasetId` — Single dataset score
 - `GET /api/standardization/report` — Full data quality report
+
+**Stage 6 — ATUM Mapping:**
+- `POST /api/atum/taxonomy/import` — Import and embed the bundled TBM Taxonomy v5.0.1 workbook
+- `GET /api/atum/taxonomy` — List official categories, optionally filtered by layer
+- `POST /api/atum/run` — Generate mappings for a taxonomy layer
+- `GET /api/atum/mappings` — List and filter mapping results
+- `POST /api/atum/mappings/:id/approve` — Approve a suggestion
+- `POST /api/atum/mappings/:id/reject` — Reject a suggestion
+- `POST /api/atum/mappings/:id/override` — Select a different official category
+- `GET /api/atum/report` — Coverage, confidence, status, and tower summary

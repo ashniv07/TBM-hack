@@ -6,6 +6,7 @@ import { DatasetDetail } from "./components/DatasetDetail";
 import { SemanticMatches } from "./components/SemanticMatches";
 import { ContextGraph } from "./components/ContextGraph";
 import { DataQualityDashboard } from "./components/DataQualityDashboard";
+import { AtumMappingDashboard } from "./components/AtumMappingDashboard";
 
 export default function App() {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
@@ -26,7 +27,7 @@ export default function App() {
     <div className="app">
       <header>
         <h1>TBM Data Trust & Intelligence Platform</h1>
-        <p className="subtitle">Stages 1-5 — Ingestion · Understanding · Embeddings · Knowledge Graph · Data Quality</p>
+        <p className="subtitle">Stages 1-6 — Ingestion · Understanding · Embeddings · Knowledge Graph · Data Quality · ATUM Mapping</p>
       </header>
 
       <main>
@@ -70,6 +71,12 @@ export default function App() {
             readiness scores (Stage 5).
           </p>
           <DataQualityDashboard />
+        </section>
+
+        <section>
+          <h2>ATUM Mapping</h2>
+          <p className="section-hint">Explainable mapping to the official TBM Taxonomy v5.0.1 with confidence scoring and consultant review.</p>
+          <AtumMappingDashboard />
         </section>
       </main>
     </div>
