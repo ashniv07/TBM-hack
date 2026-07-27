@@ -9,3 +9,5 @@ export * from "./graphs/contextGraph";
 export * from "./standardization/state";
 export * from "./graphs/standardizationGraph";
 export * from "./standardization/applyCorrections";
+export * from "./atum/importTaxonomy";
+export * from "./atum/mapToAtum";

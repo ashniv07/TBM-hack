@@ -304,6 +304,18 @@ h4 {
   margin-top: 1rem;
 }
 
+/* ---------- Stage 6: ATUM Mapping ---------- */
+.atum-actions, .atum-summary { display: flex; flex-wrap: wrap; gap: .75rem; align-items: center; margin: 1rem 0; }
+.atum-actions select, .atum-table select { background: #1a1d24; color: #e6e8eb; border: 1px solid #3a3f4b; border-radius: 4px; padding: .4rem; max-width: 260px; }
+.atum-actions .secondary { background: #262a33; }
+.atum-summary span { background: #14171d; border: 1px solid #262a33; border-radius: 7px; padding: .75rem 1rem; }
+.atum-success { color: #6fd694; }
+.atum-table button { padding: .3rem .55rem; font-size: .78rem; }
+.atum-table button.danger { background: #8c3d45; }
+.atum-table td:last-child { min-width: 180px; }
+.atum-table td:last-child select { display: block; margin-top: .5rem; width: 100%; }
+.status-suggested { color: #e0c460; }.status-approved, .status-overridden { color: #6fd694; }.status-rejected, .status-unresolved { color: #ef6f6f; }
+
 .dq-header {
   display: flex;
   gap: 0.75rem;

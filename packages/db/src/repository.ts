@@ -22,6 +22,11 @@ import {
   ReadinessScore,
   ReadinessScoreView,
   SemanticMatch,
+  AtumLayer,
+  AtumMapping,
+  AtumMappingStatus,
+  AtumMappingView,
+  AtumTaxonomyItem,
 } from "./types";
 
 // Semantic roles that represent real-world business entities worth embedding
@@ -843,4 +848,122 @@ export async function traceFromEntity(
     nodes: nodes.map((n: any) => ({ ...n, depth: depthById.get(n.id) ?? 0 })),
     edges,
   };
+}
+
+// ---------- Stage 6: ATUM Mapping ----------
+
+export async function upsertAtumTaxonomyItem(input: {
+  taxonomyVersion: string; layer: AtumLayer; level1: string; level1Description?: string;
+  level2?: string; level2Description?: string; level3?: string; level3Description?: string;
+  examples?: string; path: string; searchText: string; isRetired: boolean;
+}): Promise<AtumTaxonomyItem> {
+  const { rows } = await getPool().query<AtumTaxonomyItem>(
+    `insert into atum_taxonomy_items
+       (taxonomy_version, layer, level_1, level_1_description, level_2, level_2_description,
+        level_3, level_3_description, examples, path, search_text, is_retired)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+     on conflict (taxonomy_version, layer, path) do update set
+       level_1_description=excluded.level_1_description, level_2=excluded.level_2,
+       level_2_description=excluded.level_2_description, level_3=excluded.level_3,
+       level_3_description=excluded.level_3_description, examples=excluded.examples,
+       search_text=excluded.search_text, is_retired=excluded.is_retired, updated_at=now()
+     returning *`,
+    [input.taxonomyVersion, input.layer, input.level1, input.level1Description ?? null,
+     input.level2 ?? null, input.level2Description ?? null, input.level3 ?? null,
+     input.level3Description ?? null, input.examples ?? null, input.path, input.searchText, input.isRetired]
+  );
+  return rows[0];
+}
+
+export async function setAtumTaxonomyEmbedding(id: string, embedding: number[], source: string): Promise<void> {
+  await getPool().query(
+    `update atum_taxonomy_items set embedding=$2::vector, embedding_source=$3, updated_at=now() where id=$1`,
+    [id, toVectorLiteral(embedding), source]
+  );
+}
+
+export async function listAtumTaxonomyItems(filters?: { layer?: AtumLayer; includeRetired?: boolean }): Promise<AtumTaxonomyItem[]> {
+  const params: unknown[] = [];
+  let query = `select * from atum_taxonomy_items where 1=1`;
+  if (!filters?.includeRetired) query += ` and is_retired=false`;
+  if (filters?.layer) { params.push(filters.layer); query += ` and layer=$${params.length}`; }
+  query += ` order by layer, level_1, level_2, level_3`;
+  return (await getPool().query<AtumTaxonomyItem>(query, params)).rows;
+}
+
+export async function findNearestAtumItems(
+  embedding: number[], layer: AtumLayer, limit = 5
+): Promise<(AtumTaxonomyItem & { distance: number })[]> {
+  const { rows } = await getPool().query(
+    `select *, (embedding <=> $1::vector) as distance from atum_taxonomy_items
+     where layer=$2 and is_retired=false and embedding is not null
+     order by embedding <=> $1::vector limit $3`,
+    [toVectorLiteral(embedding), layer, limit]
+  );
+  return rows;
+}
+
+export async function getAtumMappingInputs(): Promise<{
+  dataset_id: string; column_id: string; source_value: string; semantic_role: string | null; embedding: number[];
+}[]> {
+  const { rows } = await getPool().query(
+    `select ee.dataset_id, ee.column_id, ee.entity_value as source_value, dc.semantic_role,
+            ee.embedding::text as embedding
+     from entity_embeddings ee join dataset_columns dc on dc.id=ee.column_id
+     order by ee.dataset_id, ee.column_id, ee.entity_value`
+  );
+  return rows.map((r: any) => ({ ...r, embedding: parseVectorLiteral(r.embedding) }));
+}
+
+export async function upsertAtumMapping(input: {
+  datasetId: string; columnId: string; sourceValue: string; taxonomyVersion: string; layer: AtumLayer;
+  categoryId?: string; status: AtumMappingStatus; confidence: number; method: string;
+  reasoning?: string; evidence?: Record<string, unknown>; alternatives?: unknown[]; sourceContext?: Record<string, unknown>;
+}): Promise<AtumMapping> {
+  const { rows } = await getPool().query<AtumMapping>(
+    `insert into atum_mappings
+       (dataset_id,column_id,source_value,taxonomy_version,layer,category_id,status,confidence,method,reasoning,evidence,alternatives,source_context)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+     on conflict (dataset_id,column_id,source_value,taxonomy_version,layer) do update set
+       category_id=excluded.category_id, status=case when atum_mappings.status in ('approved','overridden') then atum_mappings.status else excluded.status end,
+       confidence=excluded.confidence, method=excluded.method, reasoning=excluded.reasoning,
+       evidence=excluded.evidence, alternatives=excluded.alternatives, source_context=excluded.source_context, updated_at=now()
+     returning *`,
+    [input.datasetId,input.columnId,input.sourceValue,input.taxonomyVersion,input.layer,input.categoryId ?? null,
+     input.status,input.confidence,input.method,input.reasoning ?? null,JSON.stringify(input.evidence ?? {}),
+     JSON.stringify(input.alternatives ?? []),JSON.stringify(input.sourceContext ?? {})]
+  );
+  return rows[0];
+}
+
+export async function clearAtumMappingsForLayer(layer: AtumLayer): Promise<number> {
+  const result = await getPool().query(`delete from atum_mappings where layer=$1`, [layer]);
+  return result.rowCount ?? 0;
+}
+
+export async function listAtumMappings(filters?: { datasetId?: string; status?: AtumMappingStatus; layer?: AtumLayer }): Promise<AtumMappingView[]> {
+  const params: unknown[] = [];
+  let query = `select m.*, d.file_name as dataset_file_name, dc.column_name, dc.semantic_role,
+                      t.path as category_path, t.level_1, t.level_2, t.level_3
+               from atum_mappings m join datasets d on d.id=m.dataset_id
+               join dataset_columns dc on dc.id=m.column_id
+               left join atum_taxonomy_items t on t.id=m.category_id where 1=1`;
+  if (filters?.datasetId) { params.push(filters.datasetId); query += ` and m.dataset_id=$${params.length}`; }
+  if (filters?.status) { params.push(filters.status); query += ` and m.status=$${params.length}`; }
+  if (filters?.layer) { params.push(filters.layer); query += ` and m.layer=$${params.length}`; }
+  query += ` order by m.confidence desc, d.file_name, m.source_value`;
+  return (await getPool().query<AtumMappingView>(query, params)).rows;
+}
+
+export async function reviewAtumMapping(input: {
+  id: string; status: "approved" | "rejected" | "overridden"; reviewedBy?: string; categoryId?: string;
+}): Promise<AtumMapping | null> {
+  const { rows } = await getPool().query<AtumMapping>(
+    `update atum_mappings set status=$2, reviewed_by=$3, reviewed_at=now(),
+       category_id=coalesce($4, category_id), confidence=case when $2='overridden' then 1 else confidence end,
+       method=case when $2='overridden' then 'manual_override' else method end, updated_at=now()
+     where id=$1 returning *`,
+    [input.id,input.status,input.reviewedBy ?? null,input.categoryId ?? null]
+  );
+  return rows[0] ?? null;
 }

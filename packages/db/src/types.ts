@@ -239,3 +239,56 @@ export interface ReadinessScoreView extends ReadinessScore {
   dataset_file_name: string;
   source_type: string | null;
 }
+
+// ---------- Stage 6: ATUM Mapping ----------
+
+export type AtumLayer = "cost_pool" | "resource_tower" | "solution";
+export type AtumMappingStatus = "suggested" | "approved" | "rejected" | "overridden" | "unresolved";
+
+export interface AtumTaxonomyItem {
+  id: string;
+  taxonomy_version: string;
+  layer: AtumLayer;
+  level_1: string;
+  level_1_description: string | null;
+  level_2: string | null;
+  level_2_description: string | null;
+  level_3: string | null;
+  level_3_description: string | null;
+  examples: string | null;
+  path: string;
+  search_text: string;
+  is_retired: boolean;
+  embedding_source: string | null;
+}
+
+export interface AtumMapping {
+  id: string;
+  dataset_id: string;
+  column_id: string;
+  source_value: string;
+  source_context: Record<string, unknown> | null;
+  taxonomy_version: string;
+  layer: AtumLayer;
+  category_id: string | null;
+  status: AtumMappingStatus;
+  confidence: number;
+  method: string;
+  reasoning: string | null;
+  evidence: Record<string, unknown> | null;
+  alternatives: unknown[] | null;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AtumMappingView extends AtumMapping {
+  dataset_file_name: string;
+  column_name: string;
+  semantic_role: string | null;
+  category_path: string | null;
+  level_1: string | null;
+  level_2: string | null;
+  level_3: string | null;
+}
