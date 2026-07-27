@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import {
   AtumLayer, AtumMapping, AtumReport, AtumTaxonomyItem, fetchAtumMappings,
   fetchAtumReport, fetchAtumTaxonomy, importAtumTaxonomy, reviewAtumMapping, runAtumMapping,
+  syncAtumGraph,
 } from "../api";
 
 export function AtumMappingDashboard() {
@@ -50,10 +51,22 @@ export function AtumMappingDashboard() {
     <div className="atum-actions">
       <button disabled={busy} onClick={() => execute(importAtumTaxonomy, "Official TBM Taxonomy v5.0.1 imported.")}>Import Taxonomy</button>
       <button disabled={busy} onClick={() => execute(async () => {
-        const result = await runAtumMapping(layer, useLlm);
-        const skipped = result.stats.skippedDatasets.length;
-        setRunDetails(`Mapped ${result.stats.mapped}/${result.stats.candidates} contextual candidates${skipped ? `; ${skipped} source files were unavailable` : ""}. Embeddings: ${result.stats.embeddingSource}.`);
+        const { stats, graph } = await runAtumMapping(layer, useLlm);
+        // linkedToContext is the number that actually matters: a mapping with
+        // no Stage 4 entity can never become a knowledge-graph edge.
+        setRunDetails([
+          `Mapped ${stats.mapped}/${stats.candidates} candidates.`,
+          `${stats.linkedToContext} linked to a knowledge-graph entity.`,
+          `${graph.edges} ATUM edges across ${graph.categories} categories.`,
+          stats.fallbackDatasets.length ? `${stats.fallbackDatasets.length} dataset(s) mapped from stored embeddings (source file missing).` : "",
+          stats.skippedDatasets.length ? `${stats.skippedDatasets.length} dataset(s) skipped entirely.` : "",
+          `Embeddings: ${stats.embeddingSource}.`,
+        ].filter(Boolean).join(" "));
       }, "ATUM mapping completed.")}>Run ATUM Mapping</button>
+      <button className="secondary" disabled={busy} onClick={() => execute(async () => {
+        const result = await syncAtumGraph(layer);
+        setRunDetails(`Synced ${result.edges} edge(s) for ${result.mappings} approved mapping(s) across ${result.categories} categories.`);
+      }, "Knowledge graph synced.")}>Sync to Graph</button>
       <button className="secondary" disabled={busy} onClick={() => execute(() => refresh(), "Mappings refreshed.")}>Refresh</button>
       <select value={layer} onChange={(e) => changeLayer(e.target.value as AtumLayer)}>
         <option value="resource_tower">Resource Towers</option>
@@ -79,6 +92,9 @@ export function AtumMappingDashboard() {
       <td>{mapping.source_value}</td><td className="samples">{mapping.dataset_file_name}<br />{mapping.column_name} · {mapping.semantic_role}</td>
       <td>{mapping.category_path ?? "Unresolved"}</td><td>{Math.round(Number(mapping.confidence) * 100)}%<br /><span className={`status-badge status-${mapping.status}`}>{mapping.status}</span></td>
       <td className="reasoning">{mapping.reasoning}
+        {mapping.evidence?.canonicalEntityName
+          ? <div className="atum-linked">Graph entity: <strong>{mapping.evidence.canonicalEntityName}</strong></div>
+          : <div className="atum-unlinked" title="No Stage 4 entity resolved, so approving this will not create a knowledge-graph edge.">Not linked to graph</div>}
         {mapping.source_context && <details><summary>Row context</summary>
           {Object.entries(mapping.source_context).slice(0, 8).map(([key, value]) => <div key={key}><strong>{key}:</strong> {String(value)}</div>)}
         </details>}

@@ -7,7 +7,9 @@ import {
   AtumMappingStatus,
   listAtumMappings,
   listAtumTaxonomyItems,
+  removeAtumEdgesForMapping,
   reviewAtumMapping,
+  syncAtumEdgesToGraph,
 } from "@tbm/db";
 
 export const atumRouter = Router();
@@ -40,7 +42,10 @@ atumRouter.post("/run", async (req, res) => {
     const layer = (req.body?.layer ?? "resource_tower") as AtumLayer;
     if (!LAYERS.has(layer)) return res.status(400).json({ error: "Invalid taxonomy layer" });
     const stats = await runAtumMapping({ layer, useLlm: req.body?.useLlm === true, uploadsDir: UPLOAD_DIR });
-    res.json({ ok: true, stats });
+    // Auto-approved (>=0.85) mappings should show up in the knowledge graph
+    // straight away, otherwise the run looks like it did nothing to the graph.
+    const graph = await syncAtumEdgesToGraph({ layer });
+    res.json({ ok: true, stats, graph });
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : "ATUM mapping failed" });
   }
@@ -62,12 +67,17 @@ atumRouter.get("/mappings", async (req, res) => {
 atumRouter.post("/mappings/:id/approve", async (req, res) => {
   const mapping = await reviewAtumMapping({ id: req.params.id, status: "approved", reviewedBy: req.body?.reviewedBy });
   if (!mapping) return res.status(404).json({ error: "Mapping not found" });
-  res.json({ mapping });
+  const graph = await syncAtumEdgesToGraph({ mappingId: mapping.id });
+  // linked=0 means the mapping's anchor value has no Stage 4 alias, so it can
+  // never become a graph edge. Surfaced rather than failing silently.
+  res.json({ mapping, linkedToGraph: graph.edges > 0 });
 });
 
 atumRouter.post("/mappings/:id/reject", async (req, res) => {
   const mapping = await reviewAtumMapping({ id: req.params.id, status: "rejected", reviewedBy: req.body?.reviewedBy });
   if (!mapping) return res.status(404).json({ error: "Mapping not found" });
+  // Drop the edge so a rejected entity no longer claims a taxonomy category.
+  await removeAtumEdgesForMapping(mapping.id);
   res.json({ mapping });
 });
 
@@ -77,7 +87,20 @@ atumRouter.post("/mappings/:id/override", async (req, res) => {
     id: req.params.id, status: "overridden", categoryId: req.body.categoryId, reviewedBy: req.body?.reviewedBy,
   });
   if (!mapping) return res.status(404).json({ error: "Mapping not found" });
-  res.json({ mapping });
+  // The category changed, so the edge to the old category is stale.
+  await removeAtumEdgesForMapping(mapping.id);
+  const graph = await syncAtumEdgesToGraph({ mappingId: mapping.id });
+  res.json({ mapping, linkedToGraph: graph.edges > 0 });
+});
+
+atumRouter.post("/sync-graph", async (req, res) => {
+  try {
+    const layer = req.body?.layer as AtumLayer | undefined;
+    if (layer && !LAYERS.has(layer)) return res.status(400).json({ error: "Invalid taxonomy layer" });
+    res.json({ ok: true, ...(await syncAtumEdgesToGraph({ layer })) });
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : "ATUM graph sync failed" });
+  }
 });
 
 atumRouter.get("/report", async (_req, res) => {

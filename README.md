@@ -116,18 +116,39 @@ The platform generates:
 - TBM Readiness Score per dataset
 - Recommended Corrections with confidence scores
 
-### Stage 6 — AI-Assisted ATUM Mapping
+### Stage 6 — AI-Assisted ATUM Mapping *(implemented)*
 Using the Enterprise Context Model, embeddings, Retrieval-Augmented Generation (RAG), the ATUM Knowledge Base, and business rules, the platform automatically maps client-specific terminology into standardized ATUM categories.
 
-Generated output includes:
-- Tower
-- Sub-Tower
-- Service Domain
-- Confidence Score
-- Explainable Reasoning
-- Supporting Evidence
+**Taxonomy knowledge base:** the official `TBM-Taxonomy-v5.0.1-Data-Table.xlsx`
+is imported once into `atum_taxonomy_items` (three layers — Cost Pools,
+Resource Towers, Technology Solutions) and each category is embedded, so
+retrieval is semantic rather than keyword-only.
 
-Low-confidence mappings are routed to consultants for review.
+**Retrieval + scoring (the RAG loop):** each candidate's context text is
+embedded and used to pull the 20 nearest taxonomy categories via pgvector.
+Those candidates are then re-ranked by a blended score —
+`0.6 × vector similarity + 0.2 × lexical overlap + 0.2 × deterministic rule`
+— and, optionally, an LLM picks from the top 5 *retrieved* categories only
+(it cannot invent one). Below 0.35 the candidate is stored as `unresolved`
+rather than guessed at; at or above 0.85 it is auto-approved.
+
+**How it links to Stages 3 and 4:** each row's mapping is keyed on one
+*anchor column*. Stage 3 embeds only `EMBEDDABLE_ROLES` columns, so only those
+have a `context_entity_aliases` row — which means an embeddable-role column
+always outranks a free-text hint column when choosing the anchor
+(`displayPriority`). Free-text columns still feed the context text used for
+retrieval; they just cannot anchor. The anchor value is resolved against
+Stage 4 up front, so every mapping carries the canonical entity it belongs to
+and approved mappings become `maps_to_atum` edges in the knowledge graph.
+
+If a dataset's source file is missing, the distinct values Stage 3 already
+persisted in `entity_embeddings` are used instead of skipping the dataset.
+
+Generated output includes Tower / Sub-Tower / Service Domain, a confidence
+score, explainable reasoning, supporting evidence (vector similarity, lexical
+score, matched rule, occurrence count, and the resolved graph entity), and
+ranked alternatives. Low-confidence mappings are routed to consultants for
+review, and approve / reject / override each update the knowledge graph.
 
 **Implemented with TBM Taxonomy v5.0.1:**
 - Imports the official Cost Pool, Technology Resource Tower, and Technology Solution worksheets
@@ -178,6 +199,22 @@ cp .env.example .env   # set DATABASE_URL (use the Supabase connection pooler UR
 npm run build           # builds packages/db and packages/langgraph
 npm run db:migrate      # applies packages/db/migrations
 ```
+
+### Starting from a clean database
+
+```bash
+npm run db:reset        # DESTRUCTIVE: drops every table in the public schema,
+                        # then re-applies all migrations from scratch.
+                        # The pgvector/pgcrypto extensions are preserved.
+npm run db:seed         # copies all 19 sample workbooks from
+                        # packages/langgraph/data into the uploads dir, then
+                        # runs Stages 1-3 per workbook, then Stages 4, 5 and 6.
+                        # Add --layers=resource_tower,cost_pool,solution to map
+                        # more than the default resource_tower layer.
+```
+
+`db:seed` takes a while — it re-embeds every distinct business value through
+the OpenAI embeddings API, and one sample workbook is ~52MB.
 
 ### Run
 
@@ -244,6 +281,17 @@ After uploading datasets and running Stages 1-4:
 - `GET /api/standardization/readiness` — List all readiness scores
 - `GET /api/standardization/readiness/:datasetId` — Single dataset score
 - `GET /api/standardization/report` — Full data quality report
+
+**Stage 6 — ATUM Mapping:**
+- `POST /api/atum/taxonomy/import` — Import + embed the official TBM Taxonomy v5.0.1
+- `GET /api/atum/taxonomy?layer=` — List taxonomy categories for a layer
+- `POST /api/atum/run` — Run mapping for a layer (`{ layer, useLlm }`), then sync approved edges to the graph
+- `GET /api/atum/mappings?layer=&status=&datasetId=` — List mappings
+- `POST /api/atum/mappings/:id/approve` — Approve; creates the `maps_to_atum` edge
+- `POST /api/atum/mappings/:id/reject` — Reject; removes the edge
+- `POST /api/atum/mappings/:id/override` — Override the category; re-points the edge
+- `POST /api/atum/sync-graph` — Re-materialise approved mappings as graph edges
+- `GET /api/atum/report` — Coverage, average confidence, counts by status and tower
 
 **Stage 6 — ATUM Mapping:**
 - `POST /api/atum/taxonomy/import` — Import and embed the bundled TBM Taxonomy v5.0.1 workbook

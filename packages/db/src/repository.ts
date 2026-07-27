@@ -955,6 +955,101 @@ export async function listAtumMappings(filters?: { datasetId?: string; status?: 
   return (await getPool().query<AtumMappingView>(query, params)).rows;
 }
 
+// Stage 4 lookup used by Stage 6 to resolve an anchor cell value back to the
+// canonical entity it was clustered into. Keyed by (column_id, lowercased
+// value) because that is exactly the grain context_entity_aliases is unique on.
+export async function getContextEntityAliasMap(): Promise<
+  Map<string, { contextEntityId: string; canonicalName: string; entityType: string }>
+> {
+  const { rows } = await getPool().query(
+    `select cea.column_id, cea.entity_value, cea.context_entity_id,
+            ce.canonical_name, ce.entity_type
+     from context_entity_aliases cea
+     join context_entities ce on ce.id = cea.context_entity_id`
+  );
+  return new Map(
+    rows.map((row: any) => [
+      `${row.column_id}::${String(row.entity_value).toLowerCase()}`,
+      { contextEntityId: row.context_entity_id, canonicalName: row.canonical_name, entityType: row.entity_type },
+    ])
+  );
+}
+
+// Approved/overridden mappings joined back to the Stage 4 entity that produced
+// them. The join is on (dataset_id, column_id, entity_value) — the same grain
+// Stage 3 embedded — so a mapping anchored on a non-embeddable column simply
+// does not appear here (see extractContext.ts displayPriority).
+export async function getApprovedAtumMappingsForGraph(filters?: {
+  layer?: AtumLayer;
+  mappingId?: string;
+}): Promise<{ mapping_id: string; context_entity_id: string; category_path: string; confidence: number }[]> {
+  const params: unknown[] = [];
+  let query = `select m.id as mapping_id, cea.context_entity_id, t.path as category_path, m.confidence
+               from atum_mappings m
+               join atum_taxonomy_items t on t.id = m.category_id
+               join context_entity_aliases cea
+                 on cea.dataset_id = m.dataset_id
+                and cea.column_id = m.column_id
+                and lower(cea.entity_value) = lower(m.source_value)
+               where m.status in ('approved','overridden')`;
+  if (filters?.layer) { params.push(filters.layer); query += ` and m.layer = $${params.length}`; }
+  if (filters?.mappingId) { params.push(filters.mappingId); query += ` and m.id = $${params.length}`; }
+  return (await getPool().query(query, params)).rows;
+}
+
+export async function removeAtumEdgesForMapping(mappingId: string): Promise<number> {
+  const result = await getPool().query(`delete from context_edges where atum_mapping_id = $1`, [mappingId]);
+  return result.rowCount ?? 0;
+}
+
+// Materialise approved mappings as graph edges. Idempotent: re-running only
+// upserts, so an unchanged mapping does not duplicate its edge.
+export async function syncAtumEdgesToGraph(filters?: {
+  layer?: AtumLayer;
+  mappingId?: string;
+}): Promise<{ edges: number; categories: number; mappings: number }> {
+  const mappings = await getApprovedAtumMappingsForGraph(filters);
+  if (mappings.length === 0) return { edges: 0, categories: 0, mappings: 0 };
+
+  const client = await getPool().connect();
+  try {
+    await client.query("begin");
+    const categoryIds = new Map<string, string>();
+    for (const path of new Set(mappings.map((m) => m.category_path))) {
+      const { rows } = await client.query(
+        `insert into context_entities (entity_type, canonical_name) values ('atum_category', $1)
+         on conflict (canonical_name) where entity_type = 'atum_category'
+         do update set updated_at = now()
+         returning id`,
+        [path]
+      );
+      categoryIds.set(path, rows[0].id);
+    }
+
+    let edges = 0;
+    for (const mapping of mappings) {
+      const result = await client.query(
+        `insert into context_edges
+           (from_entity_id, to_entity_id, edge_type, weight, confidence, atum_mapping_id)
+         values ($1, $2, 'maps_to_atum', 1, $3, $4)
+         on conflict (from_entity_id, to_entity_id, edge_type)
+         do update set confidence = excluded.confidence,
+                       atum_mapping_id = excluded.atum_mapping_id,
+                       updated_at = now()`,
+        [mapping.context_entity_id, categoryIds.get(mapping.category_path), mapping.confidence, mapping.mapping_id]
+      );
+      edges += result.rowCount ?? 0;
+    }
+    await client.query("commit");
+    return { edges, categories: categoryIds.size, mappings: mappings.length };
+  } catch (err) {
+    await client.query("rollback");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 export async function reviewAtumMapping(input: {
   id: string; status: "approved" | "rejected" | "overridden"; reviewedBy?: string; categoryId?: string;
 }): Promise<AtumMapping | null> {

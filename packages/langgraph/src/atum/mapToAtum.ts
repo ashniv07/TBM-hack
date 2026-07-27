@@ -18,6 +18,10 @@ export interface AtumRunStats {
   layer: AtumLayer;
   taxonomyVersion: string;
   skippedDatasets: string[];
+  /** Datasets mapped from Stage 3 embeddings because their source file was unreadable. */
+  fallbackDatasets: string[];
+  /** Candidates that resolved to a Stage 4 canonical entity (and so can reach the graph). */
+  linkedToContext: number;
   embeddingSource: string;
 }
 
@@ -126,7 +130,7 @@ export async function runAtumMapping(options?: { layer?: AtumLayer; useLlm?: boo
         taxonomyVersion: TAXONOMY_VERSION, layer, status: "unresolved", confidence: best?.score ?? 0,
         method: "unresolved", reasoning: "No taxonomy candidate reached the minimum confidence threshold.",
         alternatives: ranked.map((r) => ({ categoryId: r.category.id, path: r.category.path, confidence: r.score })),
-        sourceContext: { ...input.context, occurrences: input.occurrences },
+        sourceContext: { ...input.context, occurrences: input.occurrences, contextEntityId: input.contextEntityId ?? null },
       });
       return;
     }
@@ -139,10 +143,17 @@ export async function runAtumMapping(options?: { layer?: AtumLayer; useLlm?: boo
       datasetId: input.datasetId, columnId: input.columnId, sourceValue: input.sourceValue,
       taxonomyVersion: TAXONOMY_VERSION, layer, categoryId: best.category.id, status,
       confidence: finalConfidence, method: ai ? "hybrid_llm" : "hybrid",
-      reasoning: ai?.reasoning ?? `Selected from contextual similarity (${Math.round(best.semanticSimilarity * 100)}%), keyword evidence (${Math.round(best.lexical * 100)}%)${best.rule.label ? `, and a ${best.rule.label} rule` : ""}.`,
-      evidence: { vectorSimilarity: best.semanticSimilarity, lexicalScore: best.lexical, rule: best.rule.label, occurrences: input.occurrences },
+      reasoning: ai?.reasoning ?? `Selected from contextual similarity (${Math.round(best.semanticSimilarity * 100)}%), keyword evidence (${Math.round(best.lexical * 100)}%)${best.rule.label ? `, and a ${best.rule.label} rule` : ""}${input.canonicalEntityName ? `, anchored on knowledge-graph entity "${input.canonicalEntityName}"` : ""}.`,
+      evidence: {
+        vectorSimilarity: best.semanticSimilarity, lexicalScore: best.lexical, rule: best.rule.label,
+        occurrences: input.occurrences,
+        // Stage 4 provenance: which canonical entity this mapping resolved to.
+        // Absent means the mapping cannot become a maps_to_atum graph edge.
+        contextEntityId: input.contextEntityId ?? null,
+        canonicalEntityName: input.canonicalEntityName ?? null,
+      },
       alternatives: ranked.slice(1).map((r) => ({ categoryId: r.category.id, path: r.category.path, confidence: r.score })),
-      sourceContext: { ...input.context, occurrences: input.occurrences },
+      sourceContext: { ...input.context, occurrences: input.occurrences, contextEntityId: input.contextEntityId ?? null },
     });
   }
 
@@ -153,5 +164,8 @@ export async function runAtumMapping(options?: { layer?: AtumLayer; useLlm?: boo
   }
 
   return { candidates: inputs.length, mapped, autoMapped, needsReview, unresolved, layer,
-    taxonomyVersion: TAXONOMY_VERSION, skippedDatasets: extracted.skippedDatasets, embeddingSource };
+    taxonomyVersion: TAXONOMY_VERSION, skippedDatasets: extracted.skippedDatasets,
+    fallbackDatasets: extracted.fallbackDatasets,
+    linkedToContext: inputs.filter((input) => input.contextEntityId).length,
+    embeddingSource };
 }

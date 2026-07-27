@@ -310,6 +310,8 @@ h4 {
 .atum-actions .secondary { background: #262a33; }
 .atum-summary span { background: #14171d; border: 1px solid #262a33; border-radius: 7px; padding: .75rem 1rem; }
 .atum-success { color: #6fd694; }
+.atum-linked { color: #6fd694; font-size: .78rem; margin-top: .35rem; }
+.atum-unlinked { color: #d69b6f; font-size: .78rem; margin-top: .35rem; }
 .atum-table button { padding: .3rem .55rem; font-size: .78rem; }
 .atum-table button.danger { background: #8c3d45; }
 .atum-table td:last-child { min-width: 180px; }

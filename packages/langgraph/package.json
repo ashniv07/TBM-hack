@@ -9,8 +9,6 @@
   },
   "dependencies": {
     "@tbm/db": "*",
-    "@langchain/langgraph": "^0.2.19",
-    "@langchain/core": "^0.3.17",
     "@langchain/openai": "^0.3.11",
     "exceljs": "^4.4.0",
     "zod": "^3.23.8"

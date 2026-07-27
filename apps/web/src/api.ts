@@ -443,6 +443,11 @@ export interface AtumMapping {
   status: "suggested" | "approved" | "rejected" | "overridden" | "unresolved";
   confidence: number; method: string; reasoning: string | null;
   source_context: Record<string, string | number> | null;
+  /** canonicalEntityName is null when the mapping has no Stage 4 entity and so cannot reach the graph. */
+  evidence: {
+    vectorSimilarity?: number; lexicalScore?: number; rule?: string; occurrences?: number;
+    contextEntityId?: string | null; canonicalEntityName?: string | null;
+  } | null;
   alternatives: { categoryId: string; path: string; confidence: number }[] | null;
 }
 
@@ -462,10 +467,22 @@ export async function runAtumMapping(layer: AtumLayer, useLlm = false) {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ layer, useLlm }),
   });
   if (!res.ok) throw new Error((await res.json()).error ?? "ATUM mapping failed");
-  return res.json() as Promise<{ ok: boolean; stats: {
-    candidates: number; mapped: number; autoMapped: number; needsReview: number; unresolved: number;
-    skippedDatasets: string[]; embeddingSource: string;
-  } }>;
+  return res.json() as Promise<{
+    ok: boolean;
+    stats: {
+      candidates: number; mapped: number; autoMapped: number; needsReview: number; unresolved: number;
+      skippedDatasets: string[]; fallbackDatasets: string[]; linkedToContext: number; embeddingSource: string;
+    };
+    graph: { edges: number; categories: number; mappings: number };
+  }>;
+}
+
+export async function syncAtumGraph(layer: AtumLayer) {
+  const res = await fetch(`${API_BASE}/atum/sync-graph`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ layer }),
+  });
+  if (!res.ok) throw new Error((await res.json()).error ?? "ATUM graph sync failed");
+  return res.json() as Promise<{ ok: boolean; edges: number; categories: number; mappings: number }>;
 }
 
 export async function fetchAtumMappings(layer?: AtumLayer): Promise<AtumMapping[]> {

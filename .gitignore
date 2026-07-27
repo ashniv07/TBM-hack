@@ -8,3 +8,7 @@ storage/uploads/
 .DS_Store
 .claude
 claude.md
+
+storage/
+*.xlsx
+*.md

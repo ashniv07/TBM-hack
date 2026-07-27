@@ -10,6 +10,8 @@
     "dev:api": "npm run dev -w apps/api",
     "dev:web": "npm run dev -w apps/web",
     "db:migrate": "npm run migrate -w packages/db",
+    "db:reset": "npm run build -w packages/db && npm run reset -w packages/db && npm run migrate -w packages/db",
+    "db:seed": "cross-env NODE_OPTIONS=--max-old-space-size=8192 node apps/api/dist/seed.js",
     "build": "npm run build -w packages/db && npm run build -w packages/langgraph && npm run build -w apps/api"
   }
 }
