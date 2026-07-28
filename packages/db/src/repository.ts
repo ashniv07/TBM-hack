@@ -324,6 +324,12 @@ export async function rebuildContextGraph(input: {
     await client.query("begin");
     await client.query("delete from context_edges");
     await client.query("delete from context_entity_aliases");
+    // Nullify FK references from TBM export tables before clearing entities
+    // (those FKs have no ON DELETE action, so they block a plain DELETE).
+    await client.query("update tbm_cost_centers set source_entity_id = null where source_entity_id is not null");
+    await client.query("update tbm_applications set source_entity_id = null where source_entity_id is not null");
+    await client.query("update tbm_vendors set source_entity_id = null where source_entity_id is not null");
+    await client.query("update tbm_cloud_resources set source_entity_id = null where source_entity_id is not null");
     await client.query("delete from context_entities");
 
     const idMap = new Map<string, string>();

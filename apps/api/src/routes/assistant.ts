@@ -10,7 +10,7 @@ export const assistantRouter = Router();
  */
 assistantRouter.post("/chat", async (req, res) => {
   try {
-    const { sessionId, message } = req.body;
+    const { sessionId, message, screenContext } = req.body;
 
     if (!message || typeof message !== "string" || message.trim().length === 0) {
       return res.status(400).json({ error: "Message is required" });
@@ -19,6 +19,7 @@ assistantRouter.post("/chat", async (req, res) => {
     const response = await processChat({
       sessionId,
       message: message.trim(),
+      screenContext: typeof screenContext === "string" ? screenContext : undefined,
     });
 
     res.json(response);

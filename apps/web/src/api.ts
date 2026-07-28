@@ -727,11 +727,11 @@ export interface ChatSuggestion {
   prompt: string;
 }
 
-export async function sendChatMessage(message: string, sessionId?: string): Promise<ChatResponse> {
+export async function sendChatMessage(message: string, sessionId?: string, screenContext?: string): Promise<ChatResponse> {
   const res = await fetch(`${API_BASE}/assistant/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message, sessionId }),
+    body: JSON.stringify({ message, sessionId, screenContext }),
   });
   if (!res.ok) throw new Error((await res.json()).error ?? "Chat failed");
   return res.json();

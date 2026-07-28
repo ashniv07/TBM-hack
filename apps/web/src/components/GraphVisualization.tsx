@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from "react";
 
 export interface VizNode {
   id: string;
@@ -28,6 +29,7 @@ const TYPE_COLORS: Record<string, string> = {
   cloud_provider: "#c98f4a",
   infrastructure_asset: "#8fb4e0",
   project: "#b3e07f",
+  atum_category: "#f2c14e",
   attribute_group: "#9aa2ad",
 };
 
@@ -43,10 +45,18 @@ const TYPE_LABELS: Record<string, string> = {
   cloud_provider: "cloud provider",
   infrastructure_asset: "infrastructure asset",
   project: "project",
+  atum_category: "ATUM category",
   attribute_group: "attribute (column)",
 };
 
 const LOW_CONFIDENCE_THRESHOLD = 0.7;
+
+const zoomBtnStyle: CSSProperties = {
+  width: 26, height: 26, borderRadius: 3, border: "1px solid var(--border)",
+  background: "rgba(20,22,27,0.9)", color: "var(--text-primary)", fontSize: 15,
+  lineHeight: 1, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+  padding: 0,
+};
 
 // Structural (foreign_key) edges represent real enterprise data lineage —
 // discovered from actual shared key values, not inference from co-occurring
@@ -58,12 +68,14 @@ const EDGE_STRENGTH: Record<string, number> = {
   foreign_key: 2.2,
   contains_reference: 1.3,
   co_occurs_with: 1,
+  maps_to_atum: 1.4,
 };
 
 const EDGE_COLOR: Record<string, string> = {
   foreign_key: "#f0a020",
   co_occurs_with: "#7fb0f5",
   contains_reference: "#4a4f5c",
+  maps_to_atum: "#c084fc",
 };
 
 interface WeightedEdge {
@@ -134,10 +146,21 @@ function forceDirectedLayout(nodeIds: string[], edges: WeightedEdge[], width: nu
       disp.get(b)!.y += dy;
     }
 
+    // Mild pull toward the canvas center. Pure repulsion has no counterforce
+    // for nodes with no edges (or a graph with no edges at all) — they just
+    // keep pushing outward every iteration until they pile up against the
+    // clamped boundary, which is what produced the "everything pinned to one
+    // edge" layout for disconnected / edge-less node sets. This keeps a
+    // sparse or edge-less graph settled into a filled cloud instead.
+    const centerX = width / 2;
+    const centerY = height / 2;
+    const GRAVITY = 0.03;
     for (const id of nodeIds) {
       const d = disp.get(id)!;
-      const dist = Math.sqrt(d.x * d.x + d.y * d.y) || 0.01;
       const p = positions.get(id)!;
+      d.x += (centerX - p.x) * GRAVITY;
+      d.y += (centerY - p.y) * GRAVITY;
+      const dist = Math.sqrt(d.x * d.x + d.y * d.y) || 0.01;
       const move = Math.min(dist, temperature);
       p.x += (d.x / dist) * move;
       p.y += (d.y / dist) * move;
@@ -147,6 +170,31 @@ function forceDirectedLayout(nodeIds: string[], edges: WeightedEdge[], width: nu
 
     temperature *= 0.97;
   }
+
+  return positions;
+}
+
+// Deterministic fallback for node sets with no edges at all. Force-directed
+// physics has nothing to organize around in that case — pure mutual repulsion
+// with no counterforce reliably piles nodes up against the canvas boundary
+// instead of filling it (verified: true regardless of gravity/iteration
+// tuning) — so a plain grid, grouped by type, reads far better than fake
+// physics for what is really just a browsable list.
+function gridLayout(sortedNodes: VizNode[], width: number, height: number) {
+  const positions = new Map<string, { x: number; y: number }>();
+  const n = sortedNodes.length;
+  if (n === 0) return positions;
+
+  const cols = Math.max(1, Math.round(Math.sqrt(n * (width / height))));
+  const rows = Math.ceil(n / cols);
+  const cellW = width / cols;
+  const cellH = height / rows;
+
+  sortedNodes.forEach((node, i) => {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    positions.set(node.id, { x: cellW * (col + 0.5), y: cellH * (row + 0.5) });
+  });
 
   return positions;
 }
@@ -162,9 +210,13 @@ export function GraphVisualization({
   onSelectNode?: (id: string) => void;
   selectedId?: string;
 }) {
-  const width = 640;
-  const height = 420;
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  // Attribute-group parent nodes start collapsed — lazy init from edges so the
+  // first render shows only the focal entity + its group headings, not every value.
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => {
+    const s = new Set<string>();
+    edges.forEach(e => { if (e.edge_type === "contains_reference") s.add(e.from_entity_id); });
+    return s;
+  });
 
   function toggleCollapse(id: string) {
     setCollapsedGroups((prev) => {
@@ -193,8 +245,21 @@ export function GraphVisualization({
     return { visibleNodes: filteredNodes, visibleEdges: filteredEdges };
   }, [nodes, edges, collapsedGroups]);
 
+  // Dynamic coordinate space — give each node ~70×55 px of room, capped at a
+  // reasonable maximum so very large graphs don't allocate gigantic SVGs.
+  const width  = Math.max(900,  Math.min(2400, visibleNodes.length * 70));
+  const height = Math.max(600,  Math.min(1600, visibleNodes.length * 55));
+
   const nodeIdsKey = visibleNodes.map((n) => n.id).join(",");
   const positions = useMemo(() => {
+    if (visibleEdges.length === 0) {
+      const sorted = [...visibleNodes].sort((a, b) =>
+        a.entity_type === b.entity_type
+          ? a.canonical_name.localeCompare(b.canonical_name)
+          : a.entity_type.localeCompare(b.entity_type)
+      );
+      return gridLayout(sorted, width, height);
+    }
     const ids = visibleNodes.map((n) => n.id);
     const edgePairs: WeightedEdge[] = visibleEdges.map((e) => ({
       a: e.from_entity_id,
@@ -203,7 +268,89 @@ export function GraphVisualization({
     }));
     return forceDirectedLayout(ids, edgePairs, width, height);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodeIdsKey, visibleEdges.length]);
+  }, [nodeIdsKey, width, height]);
+
+  // Pan/zoom is a plain SVG viewBox rectangle (vbX, vbY, vbW, vbH) rather than
+  // a CSS transform — cheaper to reason about (all math stays in the same
+  // coordinate space as `positions`) and it's what makes native browser
+  // scrollbars unnecessary, which is what made the old fixed-pixel-size SVG
+  // hard to move around.
+  const [view, setView] = useState({ x: 0, y: 0, w: width, h: height });
+  const dragRef = useRef<{ x: number; y: number; vbX: number; vbY: number } | null>(null);
+  const svgRef = useRef<SVGSVGElement | null>(null);
+
+  // Reset to "fit everything" whenever the underlying node set changes (a
+  // filter toggle, a rebuild, switching entities) — otherwise the user can be
+  // left panned/zoomed into empty space after the graph under them changes.
+  useEffect(() => {
+    setView({ x: 0, y: 0, w: width, h: height });
+  }, [nodeIdsKey, width, height]);
+
+  const ZOOM_MIN = width / 6000; // deepest zoom-in: ~6000px of virtual space visible
+  const ZOOM_MAX = 2.5; // furthest zoom-out: 2.5x the fitted view
+
+  function zoomBy(factor: number, centerScreen?: { x: number; y: number }) {
+    setView((v) => {
+      const rect = svgRef.current?.getBoundingClientRect();
+      const cx = centerScreen && rect ? v.x + ((centerScreen.x - rect.left) / rect.width) * v.w : v.x + v.w / 2;
+      const cy = centerScreen && rect ? v.y + ((centerScreen.y - rect.top) / rect.height) * v.h : v.y + v.h / 2;
+      const newW = Math.min(width * ZOOM_MAX, Math.max(width * ZOOM_MIN, v.w / factor));
+      const newH = newW * (v.h / v.w);
+      return {
+        w: newW,
+        h: newH,
+        x: cx - ((cx - v.x) / v.w) * newW,
+        y: cy - ((cy - v.y) / v.h) * newH,
+      };
+    });
+  }
+
+  function resetView() {
+    setView({ x: 0, y: 0, w: width, h: height });
+  }
+
+  function handlePointerDown(e: ReactPointerEvent<SVGSVGElement>) {
+    (e.target as Element).setPointerCapture(e.pointerId);
+    dragRef.current = { x: e.clientX, y: e.clientY, vbX: view.x, vbY: view.y };
+  }
+  function handlePointerMove(e: ReactPointerEvent<SVGSVGElement>) {
+    const drag = dragRef.current;
+    const rect = svgRef.current?.getBoundingClientRect();
+    if (!drag || !rect) return;
+    const dxScreen = e.clientX - drag.x;
+    const dyScreen = e.clientY - drag.y;
+    setView((v) => ({
+      ...v,
+      x: drag.vbX - (dxScreen / rect.width) * v.w,
+      y: drag.vbY - (dyScreen / rect.height) * v.h,
+    }));
+  }
+  function handlePointerUp() {
+    dragRef.current = null;
+  }
+  function handleWheel(e: ReactWheelEvent<SVGSVGElement>) {
+    e.preventDefault();
+    zoomBy(e.deltaY < 0 ? 1.15 : 1 / 1.15, { x: e.clientX, y: e.clientY });
+  }
+
+  const [hoverId, setHoverId] = useState<string | null>(null);
+
+  // Focus mode: hovering previews a node's connections without disturbing an
+  // active selection; moving away falls back to whatever is actually
+  // selected. With hundreds of edges on screen at once (a dense TBM graph
+  // easily has 900+), rendering everything at full strength all the time is
+  // unreadable — dimming everything not touching the focused node turns that
+  // hairball into a legible ego-network on demand.
+  const focusId = hoverId ?? selectedId ?? null;
+  const focusNeighbors = useMemo(() => {
+    if (!focusId) return null;
+    const s = new Set<string>([focusId]);
+    for (const e of visibleEdges) {
+      if (e.from_entity_id === focusId) s.add(e.to_entity_id);
+      else if (e.to_entity_id === focusId) s.add(e.from_entity_id);
+    }
+    return s;
+  }, [focusId, visibleEdges]);
 
   if (visibleNodes.length === 0) return null;
 
@@ -211,15 +358,30 @@ export function GraphVisualization({
     edges.filter((e) => e.edge_type === "contains_reference").map((e) => e.from_entity_id)
   );
 
+  const zoomFactor = width / view.w;
+  const denseGraph = visibleNodes.length > 40;
+
   return (
-    <div className="graph-viz-wrapper">
-      <svg viewBox={`0 0 ${width} ${height}`} width="100%" height={height} className="graph-viz">
+    <div className="graph-viz-wrapper" style={{ overflow: "hidden", flex: 1, position: "relative" }}>
+      <svg
+        ref={svgRef}
+        viewBox={`${view.x} ${view.y} ${view.w} ${view.h}`}
+        style={{ display: "block", width: "100%", height: "100%", cursor: dragRef.current ? "grabbing" : "grab", touchAction: "none" }}
+        className="graph-viz"
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerLeave={handlePointerUp}
+        onWheel={handleWheel}
+      >
         {visibleEdges.map((e, i) => {
           const a = positions.get(e.from_entity_id);
           const b = positions.get(e.to_entity_id);
           if (!a || !b) return null;
           const isStructural = e.edge_type === "foreign_key";
           const color = EDGE_COLOR[e.edge_type] ?? "#4a4f5c";
+          const touchesFocus = !focusNeighbors || (focusNeighbors.has(e.from_entity_id) && focusNeighbors.has(e.to_entity_id) && (e.from_entity_id === focusId || e.to_entity_id === focusId));
+          const dimmed = focusNeighbors !== null && !touchesFocus;
           return (
             <g key={i}>
               <line
@@ -229,14 +391,14 @@ export function GraphVisualization({
                 y2={b.y}
                 stroke={color}
                 strokeWidth={isStructural ? Math.min(2 + Math.log2(e.weight + 1), 8) : Math.min(1 + Math.log2(e.weight + 1), 6)}
-                strokeOpacity={isStructural || e.label ? 0.9 : 0.25 + e.confidence * 0.5}
+                strokeOpacity={dimmed ? 0.04 : isStructural || e.label ? 0.9 : 0.25 + e.confidence * 0.5}
               >
                 <title>
                   {e.edge_type}
                   {e.label ? ` (${e.label})` : ""} — confidence {Math.round(e.confidence * 100)}%, weight {e.weight}
                 </title>
               </line>
-              {e.label && (
+              {e.label && touchesFocus && (zoomFactor > 1.3 || !denseGraph) && (
                 <text x={(a.x + b.x) / 2} y={(a.y + b.y) / 2 - 4} fontSize={9} fill={color} textAnchor="middle">
                   {isStructural ? `FK(${e.label}, ${Math.round(e.confidence * 100)}%)` : e.label}
                 </text>
@@ -252,19 +414,24 @@ export function GraphVisualization({
           const isGroup = n.entity_type === "attribute_group";
           const isCollapsed = collapsedGroups.has(n.id);
           const canCollapse = isGroup && groupIdsWithChildren.has(n.id);
+          const inFocus = !focusNeighbors || focusNeighbors.has(n.id);
+          const isFocalNode = n.id === focusId;
+          const showLabel = inFocus && (isFocalNode || !denseGraph || zoomFactor > 1.3 || focusNeighbors !== null);
           return (
             <g
               key={n.id}
               onClick={() => (canCollapse ? toggleCollapse(n.id) : onSelectNode?.(n.id))}
-              style={{ cursor: canCollapse || onSelectNode ? "pointer" : "default" }}
+              onPointerEnter={() => setHoverId(n.id)}
+              onPointerLeave={() => setHoverId((h) => (h === n.id ? null : h))}
+              style={{ cursor: canCollapse || onSelectNode ? "pointer" : "default", opacity: inFocus ? 1 : 0.15 }}
             >
               <circle
                 cx={p.x}
                 cy={p.y}
                 r={n.id === selectedId ? 12 : isGroup ? 9 : 8}
                 fill={TYPE_COLORS[n.entity_type] ?? "#9aa2ad"}
-                stroke={lowConfidence ? "#ef6f6f" : isGroup ? "#c9cdd4" : "#0f1115"}
-                strokeWidth={lowConfidence ? 2.5 : isGroup ? 2 : 1.5}
+                stroke={n.id === selectedId ? "#cdde33" : lowConfidence ? "#ef6f6f" : isGroup ? "#c9cdd4" : "#0f1115"}
+                strokeWidth={n.id === selectedId ? 3 : lowConfidence ? 2.5 : isGroup ? 2 : 1.5}
                 strokeDasharray={isCollapsed ? "3,2" : undefined}
               >
                 <title>
@@ -278,13 +445,28 @@ export function GraphVisualization({
                   {isCollapsed ? "+" : "−"}
                 </text>
               )}
-              <text x={p.x + 12} y={p.y + 4} fontSize={10} fill="#c9cdd4">
-                {n.canonical_name.length > 22 ? `${n.canonical_name.slice(0, 20)}…` : n.canonical_name}
-              </text>
+              {showLabel && (
+                <text x={p.x + 12} y={p.y + 4} fontSize={10} fill="#c9cdd4">
+                  {n.canonical_name.length > 22 ? `${n.canonical_name.slice(0, 20)}…` : n.canonical_name}
+                </text>
+              )}
             </g>
           );
         })}
       </svg>
+
+      <div style={{ position: "absolute", top: 10, right: 10, display: "flex", flexDirection: "column", gap: 4 }}>
+        <button type="button" onClick={() => zoomBy(1.3)} title="Zoom in" style={zoomBtnStyle}>+</button>
+        <button type="button" onClick={() => zoomBy(1 / 1.3)} title="Zoom out" style={zoomBtnStyle}>−</button>
+        <button type="button" onClick={resetView} title="Fit to view" style={{ ...zoomBtnStyle, fontSize: 10 }}>⤢</button>
+      </div>
+
+      {!focusId && edges.length > 0 && (
+        <div style={{ position: "absolute", top: 10, left: 10, background: "rgba(15,17,21,0.85)", border: "1px solid var(--border)", borderRadius: 2, padding: "5px 10px", fontSize: 10.5, color: "var(--text-muted)" }}>
+          Drag to pan · scroll to zoom · hover or click a node to focus its connections
+        </div>
+      )}
+
       <div className="graph-viz-legend">
         {Object.entries(TYPE_LABELS).map(([type, label]) => (
           <span key={type}>
@@ -296,6 +478,9 @@ export function GraphVisualization({
         </span>
         <span>
           <span className="legend-line" style={{ background: "#7fb0f5" }} /> co-occurs (semantic)
+        </span>
+        <span>
+          <span className="legend-line" style={{ background: "#c084fc" }} /> ATUM mapping
         </span>
         <span>
           <span className="legend-dot legend-ring" /> red ring = confidence &lt; {LOW_CONFIDENCE_THRESHOLD * 100}%
