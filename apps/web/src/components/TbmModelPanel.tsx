@@ -1,7 +1,9 @@
 import { useMemo, useState } from "react";
 import { TBM_EXPORT_URL, TbmDataModel, fetchTbmModel } from "../api";
 
-type Tab = "objects" | "relationships" | "datasets";
+const money = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+
+type Tab = "objects" | "cost" | "relationships" | "datasets";
 
 const PREVIEW_ROWS = 50;
 
@@ -51,6 +53,7 @@ export function TbmModelPanel() {
       {model && (
         <>
           <div className="atum-summary">
+            <span><strong>{money.format(model.summary.totalCost)}</strong> total spend</span>
             <span><strong>{model.summary.objects}</strong> business objects</span>
             <span><strong>{Math.round(model.summary.classificationCoverage * 100)}%</strong> ATUM coverage</span>
             <span><strong>{model.summary.relationships}</strong> relationships preserved</span>
@@ -66,6 +69,7 @@ export function TbmModelPanel() {
 
           <div className="tbm-tabs">
             <button className={tab === "objects" ? "" : "secondary"} onClick={() => setTab("objects")}>Objects ({model.objects.length})</button>
+            <button className={tab === "cost" ? "" : "secondary"} onClick={() => setTab("cost")}>Cost Facts ({model.costFacts.length})</button>
             <button className={tab === "relationships" ? "" : "secondary"} onClick={() => setTab("relationships")}>Relationships ({model.relationships.length})</button>
             <button className={tab === "datasets" ? "" : "secondary"} onClick={() => setTab("datasets")}>Source Datasets ({model.sourceDatasets.length})</button>
             {tab === "objects" && (
@@ -95,6 +99,35 @@ export function TbmModelPanel() {
                 ))}
               </tbody>
             </table>
+          )}
+
+          {tab === "cost" && (
+            <>
+              <div className="atum-summary">
+                {Object.entries(model.summary.costByTower)
+                  .sort((a, b) => b[1] - a[1])
+                  .slice(0, 6)
+                  .map(([tower, amount]) => (
+                    <span key={tower}>{tower}: <strong>{money.format(amount)}</strong></span>
+                  ))}
+              </div>
+              <table className="atum-table">
+                <thead><tr><th>Cost Center</th><th>Account</th><th>Cost Pool</th><th>Resource Tower</th><th>Vendor</th><th>Amount</th><th>Lines</th></tr></thead>
+                <tbody>
+                  {model.costFacts.slice(0, PREVIEW_ROWS).map((f, i) => (
+                    <tr key={i}>
+                      <td>{f.costCenter || "—"}</td>
+                      <td>{f.account || "—"}</td>
+                      <td>{f.costPool || <span className="atum-unlinked">unallocated</span>}</td>
+                      <td>{f.resourceTower || <span className="atum-unlinked">unallocated</span>}</td>
+                      <td>{f.vendor || "—"}</td>
+                      <td>{money.format(f.amount)}</td>
+                      <td>{f.lineCount}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
           )}
 
           {tab === "relationships" && (
@@ -132,7 +165,7 @@ export function TbmModelPanel() {
             </table>
           )}
 
-          {tab !== "datasets" && (tab === "objects" ? objects.length : model.relationships.length) > PREVIEW_ROWS && (
+          {tab !== "datasets" && (tab === "objects" ? objects.length : tab === "cost" ? model.costFacts.length : model.relationships.length) > PREVIEW_ROWS && (
             <p className="section-hint">
               Showing the first {PREVIEW_ROWS} rows — the full model is in the downloadable workbook.
             </p>

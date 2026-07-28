@@ -76,6 +76,16 @@ export async function buildTbmWorkbook(model: TbmDataModel): Promise<Buffer> {
       { metric: "TBM-ready datasets", value: model.summary.tbmReadyDatasets },
       { metric: "Average readiness", value: model.summary.averageReadiness },
       { metric: "Average mapping confidence", value: model.summary.averageMappingConfidence },
+      { metric: "Total cost", value: model.summary.totalCost },
+      { metric: "Cost fact rows", value: model.summary.costFactRows },
+      ...Object.entries(model.summary.costByPool).map(([pool, amount]) => ({
+        metric: `Cost — pool — ${pool}`,
+        value: amount,
+      })),
+      ...Object.entries(model.summary.costByTower).map(([tower, amount]) => ({
+        metric: `Cost — tower — ${tower}`,
+        value: amount,
+      })),
       ...Object.entries(model.summary.objectsByType).map(([type, count]) => ({
         metric: `Objects — ${type}`,
         value: count,
@@ -114,6 +124,28 @@ export async function buildTbmWorkbook(model: TbmDataModel): Promise<Buffer> {
       { header: "Evidence Dataset", key: "evidenceDataset", width: 40 },
     ],
     model.relationships.map((r) => ({ ...r, evidenceDataset: r.evidenceDataset ?? "" }))
+  );
+
+  // The fact table. Everything above is dimensions; this is what Apptio allocates.
+  addSheet(
+    workbook,
+    "Cost Facts",
+    [
+      { header: "Cost Center", key: "costCenter", width: 30 },
+      { header: "Account", key: "account", width: 34 },
+      { header: "Cost Pool", key: "costPool", width: 22 },
+      { header: "Cost Sub Pool", key: "costSubPool", width: 22 },
+      { header: "Resource Tower", key: "resourceTower", width: 22 },
+      { header: "Resource Sub-Tower", key: "resourceSubTower", width: 24 },
+      { header: "Vendor", key: "vendor", width: 28 },
+      { header: "Project", key: "project", width: 24 },
+      { header: "Expense Type", key: "expenseType", width: 14 },
+      { header: "Period", key: "period", width: 14 },
+      { header: "Amount", key: "amount", width: 16 },
+      { header: "Source Lines", key: "lineCount", width: 12 },
+      { header: "Source Dataset", key: "datasetFile", width: 44 },
+    ],
+    model.costFacts.map((fact) => ({ ...fact, sourceType: fact.sourceType ?? "" }))
   );
 
   addSheet(

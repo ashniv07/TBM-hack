@@ -105,7 +105,7 @@ export async function persistStandardizationNode(state: StandardizationState): P
 
     // 5. Calculate stats
     const averageReadiness = persistedReadinessScores.length > 0
-      ? persistedReadinessScores.reduce((sum, s) => sum + s.overall_score, 0) / persistedReadinessScores.length
+      ? persistedReadinessScores.reduce((sum, s) => sum + Number(s.overall_score), 0) / persistedReadinessScores.length
       : 0;
 
     const stats: StandardizationStats = {

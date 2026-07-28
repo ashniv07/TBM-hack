@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "main": "dist/server.js",
   "scripts": {
-    "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
+    "dev": "node dev.js",
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/server.js"
+    "start": "node --max-old-space-size=8192 dist/server.js"
   },
   "dependencies": {
     "@tbm/db": "*",

@@ -13,5 +13,6 @@ export * from "./atum/importTaxonomy";
 export * from "./atum/mapToAtum";
 export * from "./tbm/state";
 export * from "./tbm/assemble";
+export * from "./tbm/costFacts";
 export * from "./tbm/buildModel";
 export * from "./tbm/exportWorkbook";

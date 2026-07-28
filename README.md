@@ -124,6 +124,17 @@ is imported once into `atum_taxonomy_items` (three layers — Cost Pools,
 Resource Towers, Technology Solutions) and each category is embedded, so
 retrieval is semantic rather than keyword-only.
 
+**Declared columns short-circuit retrieval.** Some workbooks state their own
+classification (`IT Resource Tower`, `IT Resource Sub-Tower`, `Cost Pool`,
+`Cost Sub Pool`). Measured against the bundled sample set, 153 of 171 distinct
+declared values (89.5%) match a real taxonomy entry on exact normalized
+comparison, so those are resolved deterministically — `method:
+"declared_column"`, confidence 1.0, auto-approved, no embedding and no vector
+search. The ~10% that miss ("Other", "LAN/WAN", "Platform") fall through to the
+retrieval path below, as do the 12 of 19 workbooks that declare nothing. The
+mapping's *anchor* column is unchanged either way, so the Stage 4 alias join
+still resolves and approved mappings still become graph edges.
+
 **Retrieval + scoring (the RAG loop):** each candidate's context text is
 embedded and used to pull the 20 nearest taxonomy categories via pgvector.
 Those candidates are then re-ranked by a blended score —
@@ -185,9 +196,18 @@ scores), so the export can never disagree with the graph it describes.
   and a missing graph or missing relationships, so a consultant sees the
   blockers before loading anything into Apptio.
 
+- **Cost facts** — the fact table Apptio actually allocates. Amounts never
+  reach Postgres (Stage 1 persists column statistics only, and Stage 3
+  deliberately excludes `cost_amount` from `EMBEDDABLE_ROLES`), so Stage 7
+  re-reads the source workbooks, the same way Stages 4 and 6 already do, and
+  aggregates by cost centre x account x cost pool x tower x vendor x period.
+  Seven of the 19 sample workbooks carry an amount column; `Cost_Source`
+  alone totals ~$15.1M across 1,177 GL lines.
+
 **Export:** `GET /api/tbm/export.xlsx` produces an Apptio-shaped workbook —
 `Model Summary`, one object table per entity type (`Vendors`,
-`Applications`, `Cost Centers`, ...), `Relationships`, and `Source Datasets`.
+`Applications`, `Cost Centers`, ...), `Relationships`, `Cost Facts`, and
+`Source Datasets`.
 The UI's **TBM Data Model** panel previews the same model and links the
 download.
 

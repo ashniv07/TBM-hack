@@ -6,7 +6,7 @@ import {
   ReadinessScoreView,
 } from "@tbm/db";
 import { TAXONOMY_VERSION } from "../atum/importTaxonomy";
-import { TbmDataModel, TbmObject, TbmRelationship, TbmSourceDataset } from "./state";
+import { TbmCostFact, TbmDataModel, TbmObject, TbmRelationship, TbmSourceDataset } from "./state";
 
 /** Readiness at or above this is considered safe to load into Apptio as-is. */
 export const TBM_READY_THRESHOLD = 0.7;
@@ -34,8 +34,10 @@ export function assembleTbmModel(input: {
   classifications: AtumEntityClassification[];
   datasets: Dataset[];
   readiness: ReadinessScoreView[];
+  costFacts?: TbmCostFact[];
   generatedAt?: string;
 }): TbmDataModel {
+  const costFacts = input.costFacts ?? [];
   const datasetNameById = new Map(input.datasets.map((d) => [d.id, d.file_name]));
   const nodeTypeById = new Map(input.nodes.map((n) => [n.id, n.entity_type]));
 
@@ -139,6 +141,17 @@ export function assembleTbmModel(input: {
     if (object.resourceTower) objectsByTower[object.resourceTower] = (objectsByTower[object.resourceTower] ?? 0) + 1;
   }
 
+  const costByPool: Record<string, number> = {};
+  const costByTower: Record<string, number> = {};
+  let totalCost = 0;
+  for (const fact of costFacts) {
+    totalCost += fact.amount;
+    const pool = fact.costPool || "Unallocated";
+    const tower = fact.resourceTower || "Unallocated";
+    costByPool[pool] = Number(((costByPool[pool] ?? 0) + fact.amount).toFixed(2));
+    costByTower[tower] = Number(((costByTower[tower] ?? 0) + fact.amount).toFixed(2));
+  }
+
   const unclassified = objects.length - classified.length;
   const notReady = sourceDatasets.filter((d) => !d.tbmReady);
   const warnings: string[] = [];
@@ -161,6 +174,12 @@ export function assembleTbmModel(input: {
   if (relationships.length === 0 && objects.length > 0) {
     warnings.push("No relationships were preserved — Apptio will not be able to allocate cost across these objects.");
   }
+  if (costFacts.length === 0) {
+    warnings.push("No cost facts were extracted — without amounts there is nothing for Apptio to allocate. Check that the source workbooks are readable from this machine.");
+  } else if (costByTower.Unallocated) {
+    const share = Math.round((costByTower.Unallocated / totalCost) * 100);
+    warnings.push(`${share}% of total spend carries no resource tower and will land unallocated in Apptio.`);
+  }
 
   return {
     generatedAt: input.generatedAt ?? new Date().toISOString(),
@@ -176,9 +195,14 @@ export function assembleTbmModel(input: {
       averageMappingConfidence: average(classified.map((o) => o.atumConfidence!)),
       objectsByType,
       objectsByTower,
+      totalCost: Number(totalCost.toFixed(2)),
+      costFactRows: costFacts.length,
+      costByPool,
+      costByTower,
     },
     objects,
     relationships,
+    costFacts,
     sourceDatasets,
     warnings,
   };

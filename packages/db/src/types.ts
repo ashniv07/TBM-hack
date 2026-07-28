@@ -81,7 +81,7 @@ export interface RawEntityEmbeddingRow {
   dataset_id: string;
   column_id: string;
   entity_value: string;
-  embedding: number[];
+  embedding: Float32Array;
   embedding_source: string;
   semantic_role: string;
   column_name: string;

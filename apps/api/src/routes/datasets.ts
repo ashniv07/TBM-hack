@@ -55,7 +55,7 @@ datasetsRouter.post("/upload", upload.array("files", 20), wrap(async (req, res) 
           // ingestion — the dataset still shows up in the catalog either way.
           try {
             await runUnderstanding(ingested.datasetId);
-            await runEmbedding(ingested.datasetId, { uploadsDir: UPLOAD_DIR });
+            await runEmbedding(ingested.datasetId, { uploadsDir: UPLOAD_DIR, rows: ingested.sheet?.rows });
           } catch (stageErr) {
             return {
               fileName: file.originalname,

@@ -1,5 +1,5 @@
 import { getAllEmbeddableEntityRows, getDatasetsWithEmbeddings, RawEntityEmbeddingRow } from "@tbm/db";
-import { cosineDistance, UnionFind } from "./clustering";
+import { toUnitVector, unitCosineDistance, UnionFind } from "./clustering";
 import { ContextState, DatasetNode, EntityAlias, ResolvedEntity } from "./state";
 
 const DEFAULT_SIMILARITY_THRESHOLD = 0.15;
@@ -79,21 +79,21 @@ export async function resolveEntitiesNode(state: ContextState): Promise<Partial<
     }
 
     const normKeys = Array.from(normGroups.keys()).sort();
-    const representative = new Map<string, RawEntityEmbeddingRow>();
-    for (const key of normKeys) {
-      representative.set(key, normGroups.get(key)![0]);
-    }
+    // Normalize each representative once, then the pairwise loop below is a
+    // bare dot product. Indexed by position so the inner loop never touches a
+    // Map — at O(n^2) iterations, the lookup cost dominates otherwise.
+    const vectors = normKeys.map((key) => toUnitVector(normGroups.get(key)![0].embedding));
 
     const uf = new UnionFind();
     for (let i = 0; i < normKeys.length; i++) {
+      const a = vectors[i];
       for (let j = i + 1; j < normKeys.length; j++) {
-        const a = representative.get(normKeys[i])!;
-        const b = representative.get(normKeys[j])!;
-        if (cosineDistance(a.embedding, b.embedding) < threshold) {
+        if (unitCosineDistance(a, vectors[j]) < threshold) {
           uf.union(normKeys[i], normKeys[j]);
         }
       }
     }
+    const vectorByKey = new Map(normKeys.map((key, i) => [key, vectors[i]]));
 
     const clusters = new Map<string, string[]>();
     for (const key of normKeys) {
@@ -121,9 +121,8 @@ export async function resolveEntitiesNode(state: ContextState): Promise<Partial<
       let maxIntraClusterDistance = 0;
       for (let i = 0; i < memberKeys.length; i++) {
         for (let j = i + 1; j < memberKeys.length; j++) {
-          const a = representative.get(memberKeys[i])!;
-          const b = representative.get(memberKeys[j])!;
-          maxIntraClusterDistance = Math.max(maxIntraClusterDistance, cosineDistance(a.embedding, b.embedding));
+          const distance = unitCosineDistance(vectorByKey.get(memberKeys[i])!, vectorByKey.get(memberKeys[j])!);
+          if (distance > maxIntraClusterDistance) maxIntraClusterDistance = distance;
         }
       }
       const confidence = Number(Math.max(0, Math.min(1, 1 - maxIntraClusterDistance)).toFixed(3));

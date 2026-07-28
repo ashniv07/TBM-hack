@@ -1,13 +1,16 @@
 import {
   AtumLayer,
+  AtumMappingInput,
   AtumTaxonomyItem,
   clearAtumMappingsForLayer,
   findNearestAtumItems,
-  upsertAtumMapping,
+  listAtumTaxonomyItems,
+  upsertAtumMappings,
 } from "@tbm/db";
 import { TAXONOMY_VERSION } from "./importTaxonomy";
 import { embedTexts } from "../embedding/embedText";
 import { extractContextualMappingInputs } from "./extractContext";
+import { buildDeclaredCategoryIndex, normalizeTaxonomyKey } from "./declaredCategory";
 
 export interface AtumRunStats {
   candidates: number;
@@ -22,6 +25,8 @@ export interface AtumRunStats {
   fallbackDatasets: string[];
   /** Candidates that resolved to a Stage 4 canonical entity (and so can reach the graph). */
   linkedToContext: number;
+  /** Candidates classified straight from a declared column, with no embedding or retrieval. */
+  declaredMapped: number;
   embeddingSource: string;
 }
 
@@ -86,14 +91,48 @@ export async function runAtumMapping(options?: { layer?: AtumLayer; useLlm?: boo
   const layer = options?.layer ?? "resource_tower";
   const extracted = await extractContextualMappingInputs({ layer, uploadsDir: options?.uploadsDir });
   const inputs = extracted.inputs;
-  let mapped = 0, autoMapped = 0, needsReview = 0, unresolved = 0;
+  let mapped = 0, autoMapped = 0, needsReview = 0, unresolved = 0, declaredMapped = 0;
 
   await clearAtumMappingsForLayer(layer);
   let embeddingSource = "none";
+  const writes: AtumMappingInput[] = [];
 
-  const embeddedInputs: (typeof inputs[number] & { embedding: number[] })[] = [];
-  for (let i = 0; i < inputs.length; i += 100) {
-    const batch = inputs.slice(i, i + 100);
+  function baseRow(input: (typeof inputs)[number]) {
+    return {
+      datasetId: input.datasetId, columnId: input.columnId, sourceValue: input.sourceValue,
+      taxonomyVersion: TAXONOMY_VERSION, layer,
+      sourceContext: { ...input.context, occurrences: input.occurrences, contextEntityId: input.contextEntityId ?? null },
+    };
+  }
+
+  // ---- Pass 1: values the source workbook already classified ----
+  // Exact match against the taxonomy, so there is nothing to embed, retrieve or
+  // rank. These skip the OpenAI round-trip entirely, which is most of what a
+  // mapping run used to cost on this data.
+  const declaredIndex = buildDeclaredCategoryIndex(await listAtumTaxonomyItems({ layer }));
+  const needsRetrieval: typeof inputs = [];
+  for (const input of inputs) {
+    const category = input.declaredValue ? declaredIndex.get(normalizeTaxonomyKey(input.declaredValue)) : undefined;
+    if (!category) {
+      needsRetrieval.push(input);
+      continue;
+    }
+    mapped++; autoMapped++; declaredMapped++;
+    writes.push({
+      ...baseRow(input), categoryId: category.id, status: "approved", confidence: 1, method: "declared_column",
+      reasoning: `The source dataset states this classification directly ("${input.declaredValue}"), matched to the official taxonomy entry ${category.path}${input.canonicalEntityName ? `, anchored on knowledge-graph entity "${input.canonicalEntityName}"` : ""}.`,
+      evidence: {
+        declaredValue: input.declaredValue, occurrences: input.occurrences,
+        contextEntityId: input.contextEntityId ?? null, canonicalEntityName: input.canonicalEntityName ?? null,
+      },
+      alternatives: [],
+    });
+  }
+
+  // ---- Pass 2: everything else goes through the existing RAG path ----
+  const embeddedInputs: ((typeof needsRetrieval)[number] & { embedding: number[] })[] = [];
+  for (let i = 0; i < needsRetrieval.length; i += 100) {
+    const batch = needsRetrieval.slice(i, i + 100);
     const embedded = await embedTexts(batch.map((input) => input.contextText));
     embeddingSource = embedded.source;
     embeddedInputs.push(...batch.map((input, index) => ({ ...input, embedding: embedded.vectors[index] })));
@@ -117,12 +156,10 @@ export async function runAtumMapping(options?: { layer?: AtumLayer; useLlm?: boo
 
     if (!best || best.score < 0.35) {
       unresolved++;
-      await upsertAtumMapping({
-        datasetId: input.datasetId, columnId: input.columnId, sourceValue: input.sourceValue,
-        taxonomyVersion: TAXONOMY_VERSION, layer, status: "unresolved", confidence: best?.score ?? 0,
+      writes.push({
+        ...baseRow(input), status: "unresolved", confidence: best?.score ?? 0,
         method: "unresolved", reasoning: "No taxonomy candidate reached the minimum confidence threshold.",
         alternatives: ranked.map((r) => ({ categoryId: r.category.id, path: r.category.path, confidence: r.score })),
-        sourceContext: { ...input.context, occurrences: input.occurrences, contextEntityId: input.contextEntityId ?? null },
       });
       return;
     }
@@ -131,9 +168,8 @@ export async function runAtumMapping(options?: { layer?: AtumLayer; useLlm?: boo
     const status = finalConfidence >= 0.85 ? "approved" : "suggested";
     mapped++;
     if (status === "approved") autoMapped++; else needsReview++;
-    await upsertAtumMapping({
-      datasetId: input.datasetId, columnId: input.columnId, sourceValue: input.sourceValue,
-      taxonomyVersion: TAXONOMY_VERSION, layer, categoryId: best.category.id, status,
+    writes.push({
+      ...baseRow(input), categoryId: best.category.id, status,
       confidence: finalConfidence, method: ai ? "hybrid_llm" : "hybrid",
       reasoning: ai?.reasoning ?? `Selected from contextual similarity (${Math.round(best.semanticSimilarity * 100)}%), keyword evidence (${Math.round(best.lexical * 100)}%)${best.rule.label ? `, and a ${best.rule.label} rule` : ""}${input.canonicalEntityName ? `, anchored on knowledge-graph entity "${input.canonicalEntityName}"` : ""}.`,
       evidence: {
@@ -145,19 +181,20 @@ export async function runAtumMapping(options?: { layer?: AtumLayer; useLlm?: boo
         canonicalEntityName: input.canonicalEntityName ?? null,
       },
       alternatives: ranked.slice(1).map((r) => ({ categoryId: r.category.id, path: r.category.path, confidence: r.score })),
-      sourceContext: { ...input.context, occurrences: input.occurrences, contextEntityId: input.contextEntityId ?? null },
     });
   }
 
-  // Bound concurrency to the default pg pool size. This turns hundreds of
-  // remote round trips into manageable batches without overwhelming Postgres.
+  // Bound concurrency to the default pg pool size — each mapInput issues one
+  // pgvector query. The writes they queue are flushed in batches below.
   for (let i = 0; i < embeddedInputs.length; i += 10) {
     await Promise.all(embeddedInputs.slice(i, i + 10).map(mapInput));
   }
+
+  await upsertAtumMappings(writes);
 
   return { candidates: inputs.length, mapped, autoMapped, needsReview, unresolved, layer,
     taxonomyVersion: TAXONOMY_VERSION, skippedDatasets: extracted.skippedDatasets,
     fallbackDatasets: extracted.fallbackDatasets,
     linkedToContext: inputs.filter((input) => input.contextEntityId).length,
-    embeddingSource };
+    declaredMapped, embeddingSource };
 }

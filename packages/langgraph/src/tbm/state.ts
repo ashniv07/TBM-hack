@@ -54,6 +54,25 @@ export interface TbmSourceDataset {
   tbmReady: boolean;
 }
 
+/** One aggregated spend row: the money Apptio actually allocates. */
+export interface TbmCostFact {
+  datasetFile: string;
+  sourceType: string | null;
+  costCenter: string;
+  account: string;
+  costPool: string;
+  costSubPool: string;
+  resourceTower: string;
+  resourceSubTower: string;
+  vendor: string;
+  project: string;
+  expenseType: string;
+  period: string;
+  amount: number;
+  /** Source rows folded into this aggregate. */
+  lineCount: number;
+}
+
 export interface TbmModelSummary {
   objects: number;
   classifiedObjects: number;
@@ -65,6 +84,10 @@ export interface TbmModelSummary {
   averageMappingConfidence: number;
   objectsByType: Record<string, number>;
   objectsByTower: Record<string, number>;
+  totalCost: number;
+  costFactRows: number;
+  costByPool: Record<string, number>;
+  costByTower: Record<string, number>;
 }
 
 export interface TbmDataModel {
@@ -73,6 +96,7 @@ export interface TbmDataModel {
   summary: TbmModelSummary;
   objects: TbmObject[];
   relationships: TbmRelationship[];
+  costFacts: TbmCostFact[];
   sourceDatasets: TbmSourceDataset[];
   /** Blockers a consultant must see before loading this into Apptio. */
   warnings: string[];

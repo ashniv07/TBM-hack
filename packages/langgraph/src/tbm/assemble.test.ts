@@ -105,6 +105,31 @@ describe("assembleTbmModel", () => {
     expect(model.warnings.some((w) => w.includes("TBM-readiness threshold"))).toBe(true);
   });
 
+  it("totals cost by pool and tower, and flags the unallocated share", () => {
+    const fact = (over: Partial<import("./state").TbmCostFact>) => ({
+      datasetFile: "Cost_Source_Master_Data.xlsx", sourceType: "General Ledger",
+      costCenter: "CC-200", account: "ACCT_2090", costPool: "Staffing", costSubPool: "Internal Labor",
+      resourceTower: "Compute", resourceSubTower: "", vendor: "", project: "", expenseType: "OpEx",
+      period: "", amount: 100, lineCount: 1, ...over,
+    });
+    const model = assembleTbmModel({
+      nodes: [node({ id: "n1" })], edges: [], classifications: [], datasets: [dataset], readiness: [readiness(0.9)],
+      costFacts: [fact({}), fact({ amount: 300 }), fact({ resourceTower: "", costPool: "", amount: 100 })],
+    });
+    expect(model.summary.totalCost).toBe(500);
+    expect(model.summary.costByPool).toEqual({ Staffing: 400, Unallocated: 100 });
+    expect(model.summary.costByTower).toEqual({ Compute: 400, Unallocated: 100 });
+    expect(model.warnings.some((w) => w.includes("20% of total spend carries no resource tower"))).toBe(true);
+  });
+
+  it("warns loudly when there is no cost data at all", () => {
+    const model = assembleTbmModel({
+      nodes: [node({ id: "n1" })], edges: [], classifications: [], datasets: [dataset], readiness: [],
+    });
+    expect(model.summary.totalCost).toBe(0);
+    expect(model.warnings.some((w) => w.includes("nothing for Apptio to allocate"))).toBe(true);
+  });
+
   it("derives each object's source datasets from the edges that evidenced it", () => {
     const model = assembleTbmModel({
       nodes: [node({ id: "n1" }), node({ id: "n2", entity_type: "cost_center" })],

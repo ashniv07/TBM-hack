@@ -156,7 +156,7 @@ standardizationRouter.get(
       issuesBySeverity[issue.severity] = (issuesBySeverity[issue.severity] ?? 0) + 1;
     }
     const avgReadiness = scores.length
-      ? scores.reduce((sum, s) => sum + s.overall_score, 0) / scores.length
+      ? scores.reduce((sum, s) => sum + Number(s.overall_score), 0) / scores.length
       : 0;
 
     res.json({

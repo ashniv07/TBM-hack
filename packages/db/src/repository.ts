@@ -91,28 +91,27 @@ export async function setDatasetSourceType(id: string, sourceType: string, confi
 }
 
 export async function insertColumns(datasetId: string, columns: Omit<DatasetColumn, "id" | "dataset_id">[]) {
-  const pool = getPool();
-  for (const col of columns) {
-    await pool.query(
+  for (const batch of chunk(columns, WRITE_BATCH_SIZE)) {
+    const params: unknown[] = [];
+    const tuples = batch.map((col, i) => {
+      params.push(
+        datasetId, col.column_name, col.ordinal, col.inferred_type, col.null_pct,
+        col.distinct_count, JSON.stringify(col.sample_values ?? []), col.is_candidate_key
+      );
+      const b = i * 8;
+      return `($${b + 1}, $${b + 2}, $${b + 3}, $${b + 4}, $${b + 5}, $${b + 6}, $${b + 7}::jsonb, $${b + 8})`;
+    });
+    await getPool().query(
       `insert into dataset_columns
         (dataset_id, column_name, ordinal, inferred_type, null_pct, distinct_count, sample_values, is_candidate_key)
-       values ($1, $2, $3, $4, $5, $6, $7, $8)
+       values ${tuples.join(", ")}
        on conflict (dataset_id, column_name) do update set
          inferred_type = excluded.inferred_type,
          null_pct = excluded.null_pct,
          distinct_count = excluded.distinct_count,
          sample_values = excluded.sample_values,
          is_candidate_key = excluded.is_candidate_key`,
-      [
-        datasetId,
-        col.column_name,
-        col.ordinal,
-        col.inferred_type,
-        col.null_pct,
-        col.distinct_count,
-        JSON.stringify(col.sample_values ?? []),
-        col.is_candidate_key,
-      ]
+      params
     );
   }
 }
@@ -149,14 +148,27 @@ export async function setDatasetBusinessPurpose(id: string, purpose: string) {
   await getPool().query(`update datasets set business_purpose = $2, updated_at = now() where id = $1`, [id, purpose]);
 }
 
-export async function updateColumnUnderstanding(
-  columnId: string,
-  input: { semanticRole: string; semanticRoleConfidence: number; isTechnical: boolean }
+// One UPDATE per batch via a VALUES join, rather than one round-trip per column.
+// A 107-column dataset (Cost_Source_Master_Data) went from 107 sequential
+// round-trips to 1.
+export async function updateColumnUnderstandings(
+  updates: { columnId: string; semanticRole: string; semanticRoleConfidence: number; isTechnical: boolean }[]
 ) {
-  await getPool().query(
-    `update dataset_columns set semantic_role = $2, semantic_role_confidence = $3, is_technical = $4 where id = $1`,
-    [columnId, input.semanticRole, input.semanticRoleConfidence, input.isTechnical]
-  );
+  for (const batch of chunk(updates, WRITE_BATCH_SIZE)) {
+    const params: unknown[] = [];
+    const tuples = batch.map((u, i) => {
+      params.push(u.columnId, u.semanticRole, u.semanticRoleConfidence, u.isTechnical);
+      const b = i * 4;
+      return `($${b + 1}::uuid, $${b + 2}::text, $${b + 3}::numeric, $${b + 4}::boolean)`;
+    });
+    await getPool().query(
+      `update dataset_columns dc set
+         semantic_role = v.role, semantic_role_confidence = v.confidence, is_technical = v.technical
+       from (values ${tuples.join(", ")}) as v(id, role, confidence, technical)
+       where dc.id = v.id`,
+      params
+    );
+  }
 }
 
 export async function getOtherDatasetColumns(excludeDatasetId: string): Promise<(DatasetColumn & { dataset_file_name: string; dataset_source_type: string | null })[]> {
@@ -170,22 +182,26 @@ export async function getOtherDatasetColumns(excludeDatasetId: string): Promise<
   return rows;
 }
 
-export async function insertRelationship(input: {
-  fromColumnId: string;
-  toColumnId: string;
-  relationshipType: string;
-  confidence: number;
-  reasoning?: string;
-}) {
-  await getPool().query(
-    `insert into dataset_relationships (from_column_id, to_column_id, relationship_type, confidence, reasoning)
-     values ($1, $2, $3, $4, $5)
-     on conflict (from_column_id, to_column_id) do update set
-       relationship_type = excluded.relationship_type,
-       confidence = excluded.confidence,
-       reasoning = excluded.reasoning`,
-    [input.fromColumnId, input.toColumnId, input.relationshipType, input.confidence, input.reasoning ?? null]
-  );
+export async function insertRelationships(
+  inputs: { fromColumnId: string; toColumnId: string; relationshipType: string; confidence: number; reasoning?: string }[]
+) {
+  for (const batch of chunk(inputs, WRITE_BATCH_SIZE)) {
+    const params: unknown[] = [];
+    const tuples = batch.map((input, i) => {
+      params.push(input.fromColumnId, input.toColumnId, input.relationshipType, input.confidence, input.reasoning ?? null);
+      const b = i * 5;
+      return `($${b + 1}, $${b + 2}, $${b + 3}, $${b + 4}, $${b + 5})`;
+    });
+    await getPool().query(
+      `insert into dataset_relationships (from_column_id, to_column_id, relationship_type, confidence, reasoning)
+       values ${tuples.join(", ")}
+       on conflict (from_column_id, to_column_id) do update set
+         relationship_type = excluded.relationship_type,
+         confidence = excluded.confidence,
+         reasoning = excluded.reasoning`,
+      params
+    );
+  }
 }
 
 export async function getRelationshipsForDataset(datasetId: string): Promise<DatasetRelationshipView[]> {
@@ -225,50 +241,98 @@ function toVectorLiteral(embedding: number[]): string {
   return `[${embedding.join(",")}]`;
 }
 
-export async function upsertEntityEmbedding(input: {
-  datasetId: string;
-  columnId: string;
-  entityValue: string;
-  embedding: number[];
-  embeddingSource: string;
-}) {
-  await getPool().query(
-    `insert into entity_embeddings (dataset_id, column_id, entity_value, embedding, embedding_source)
-     values ($1, $2, $3, $4::vector, $5)
-     on conflict (column_id, entity_value) do update set
-       embedding = excluded.embedding,
-       embedding_source = excluded.embedding_source`,
-    [input.datasetId, input.columnId, input.entityValue, toVectorLiteral(input.embedding), input.embeddingSource]
-  );
+// The single hottest write path in the platform: Stage 3 embeds up to
+// MAX_DISTINCT_VALUES_PER_COLUMN values per embeddable column, so a dataset
+// with 10 such columns produced ~5,000 sequential round-trips to a remote
+// Supabase instance. Batched, that is ~10.
+export async function upsertEntityEmbeddings(
+  inputs: { datasetId: string; columnId: string; entityValue: string; embedding: number[]; embeddingSource: string }[]
+) {
+  // 5 params/row; keep batches small enough that the vector literals do not
+  // build a multi-megabyte query string (1536 floats is ~15KB of text per row).
+  for (const batch of chunk(inputs, EMBEDDING_BATCH_SIZE)) {
+    const params: unknown[] = [];
+    const tuples = batch.map((input, i) => {
+      params.push(input.datasetId, input.columnId, input.entityValue, toVectorLiteral(input.embedding), input.embeddingSource);
+      const b = i * 5;
+      return `($${b + 1}, $${b + 2}, $${b + 3}, $${b + 4}::vector, $${b + 5})`;
+    });
+    await getPool().query(
+      `insert into entity_embeddings (dataset_id, column_id, entity_value, embedding, embedding_source)
+       values ${tuples.join(", ")}
+       on conflict (column_id, entity_value) do update set
+         embedding = excluded.embedding,
+         embedding_source = excluded.embedding_source`,
+      params
+    );
+  }
 }
 
+// How many rows are used as k-NN probes, and how many neighbours each one
+// retrieves. This panel exists to *show examples* of cross-dataset matches, not
+// to enumerate them exhaustively, so a bounded sample is the right shape.
+const MATCH_PROBE_ROWS = 2000;
+const MATCH_NEIGHBOURS_PER_PROBE = 4;
+
+// Previously an all-pairs self-join: every embedding compared against every
+// other, which cannot use the ivfflat index (an ANN index answers "nearest to
+// THIS vector", and a cartesian product has no probe vector) and cannot be
+// saved by LIMIT (ORDER BY distance forces every distance to be computed
+// first). At n embeddings that is n^2/2 comparisons of 1536-dim vectors — fine
+// for a handful of datasets, effectively non-terminating once all 19 sample
+// workbooks are loaded.
+//
+// Now: take a bounded sample of rows and ask the index for each one's nearest
+// neighbours in *other* datasets. That is MATCH_PROBE_ROWS index lookups
+// instead of a quadratic scan. `e.id > p.id` both dedupes the (A,B)/(B,A)
+// mirror and halves the candidate set.
+//
+// ponytail: approximate — ivfflat with lists=10 at the default probe count can
+// miss a true nearest neighbour, and only the first MATCH_PROBE_ROWS rows are
+// probed. Both are acceptable for an illustrative panel; raise `probes` or the
+// sample if this ever needs to be exhaustive.
 export async function getCrossDatasetMatches(maxDistance = 0.25, limit = 30): Promise<SemanticMatch[]> {
   const { rows } = await getPool().query(
-    `select
-        ea.entity_value as value_a, da.id as dataset_a_id, da.file_name as dataset_a_name, ca.column_name as column_a_name,
-        eb.entity_value as value_b, db_.id as dataset_b_id, db_.file_name as dataset_b_name, cb.column_name as column_b_name,
-        (ea.embedding <=> eb.embedding) as distance
-     from entity_embeddings ea
-     join entity_embeddings eb on eb.dataset_id != ea.dataset_id and eb.id > ea.id
-     join datasets da on da.id = ea.dataset_id
-     join datasets db_ on db_.id = eb.dataset_id
-     join dataset_columns ca on ca.id = ea.column_id
-     join dataset_columns cb on cb.id = eb.column_id
-     where (ea.embedding <=> eb.embedding) < $1
-     order by distance asc
+    `with probe as (
+       select id, dataset_id, column_id, entity_value, embedding
+       from entity_embeddings
+       order by id
+       limit $3
+     )
+     select
+        p.entity_value as value_a, da.id as dataset_a_id, da.file_name as dataset_a_name, ca.column_name as column_a_name,
+        m.entity_value as value_b, db_.id as dataset_b_id, db_.file_name as dataset_b_name, cb.column_name as column_b_name,
+        m.distance
+     from probe p
+     cross join lateral (
+       select e.id, e.dataset_id, e.column_id, e.entity_value, (e.embedding <=> p.embedding) as distance
+       from entity_embeddings e
+       where e.dataset_id <> p.dataset_id and e.id > p.id
+       order by e.embedding <=> p.embedding
+       limit $4
+     ) m
+     join datasets da on da.id = p.dataset_id
+     join datasets db_ on db_.id = m.dataset_id
+     join dataset_columns ca on ca.id = p.column_id
+     join dataset_columns cb on cb.id = m.column_id
+     where m.distance < $1
+     order by m.distance asc
      limit $2`,
-    [maxDistance, limit]
+    [maxDistance, limit, MATCH_PROBE_ROWS, MATCH_NEIGHBOURS_PER_PROBE]
   );
   return rows;
 }
 
 // ---------- Stage 4: Enterprise Context Model (Knowledge Graph) ----------
 
-function parseVectorLiteral(value: string): number[] {
-  return value
-    .replace(/^\[|\]$/g, "")
-    .split(",")
-    .map(Number);
+// Float32Array because pgvector's `vector` is float4 on disk — this is lossless
+// relative to what was stored, and roughly halves the memory a full-table read
+// of entity_embeddings costs Node (Stage 4 loads every embedded value at once).
+function parseVectorLiteral(value: string): Float32Array {
+  const parts = value.replace(/^\[|\]$/g, "").split(",");
+  const out = new Float32Array(parts.length);
+  for (let i = 0; i < parts.length; i++) out[i] = Number(parts[i]);
+  return out;
 }
 
 // All embeddable entity values across every dataset, joined back to their
@@ -307,6 +371,12 @@ export async function getDatasetsWithEmbeddings(): Promise<Dataset[]> {
 // infrastructure_asset), so a single rebuild can produce hundreds of aliases
 // and edges — at one round-trip each, that alone was taking minutes.
 const REBUILD_BATCH_SIZE = 500;
+
+// Same reasoning as REBUILD_BATCH_SIZE, applied to the per-dataset write paths
+// (columns, classifications, relationships, embeddings). Embeddings get a
+// smaller batch because each row carries a 1536-float vector literal.
+const WRITE_BATCH_SIZE = 500;
+const EMBEDDING_BATCH_SIZE = 100;
 
 function chunk<T>(items: T[], size: number): T[][] {
   const batches: T[][] = [];
@@ -888,37 +958,59 @@ export async function findNearestAtumItems(
   return rows;
 }
 
+// Stage 6's fallback list of already-embedded values, used when a dataset's
+// source file cannot be read. The embedding itself is deliberately NOT selected:
+// the only caller (extractContext.fallbackRowsFor) reads column_id and
+// source_value, so shipping and parsing a 1536-float vector per row was pure
+// waste on every fallback run.
 export async function getAtumMappingInputs(): Promise<{
-  dataset_id: string; column_id: string; source_value: string; semantic_role: string | null; embedding: number[];
+  dataset_id: string; column_id: string; source_value: string; semantic_role: string | null;
 }[]> {
   const { rows } = await getPool().query(
-    `select ee.dataset_id, ee.column_id, ee.entity_value as source_value, dc.semantic_role,
-            ee.embedding::text as embedding
+    `select ee.dataset_id, ee.column_id, ee.entity_value as source_value, dc.semantic_role
      from entity_embeddings ee join dataset_columns dc on dc.id=ee.column_id
      order by ee.dataset_id, ee.column_id, ee.entity_value`
   );
-  return rows.map((r: any) => ({ ...r, embedding: parseVectorLiteral(r.embedding) }));
+  return rows;
 }
 
-export async function upsertAtumMapping(input: {
+export interface AtumMappingInput {
   datasetId: string; columnId: string; sourceValue: string; taxonomyVersion: string; layer: AtumLayer;
   categoryId?: string; status: AtumMappingStatus; confidence: number; method: string;
   reasoning?: string; evidence?: Record<string, unknown>; alternatives?: unknown[]; sourceContext?: Record<string, unknown>;
-}): Promise<AtumMapping> {
-  const { rows } = await getPool().query<AtumMapping>(
-    `insert into atum_mappings
-       (dataset_id,column_id,source_value,taxonomy_version,layer,category_id,status,confidence,method,reasoning,evidence,alternatives,source_context)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-     on conflict (dataset_id,column_id,source_value,taxonomy_version,layer) do update set
-       category_id=excluded.category_id, status=case when atum_mappings.status in ('approved','overridden') then atum_mappings.status else excluded.status end,
-       confidence=excluded.confidence, method=excluded.method, reasoning=excluded.reasoning,
-       evidence=excluded.evidence, alternatives=excluded.alternatives, source_context=excluded.source_context, updated_at=now()
-     returning *`,
-    [input.datasetId,input.columnId,input.sourceValue,input.taxonomyVersion,input.layer,input.categoryId ?? null,
-     input.status,input.confidence,input.method,input.reasoning ?? null,JSON.stringify(input.evidence ?? {}),
-     JSON.stringify(input.alternatives ?? []),JSON.stringify(input.sourceContext ?? {})]
-  );
-  return rows[0];
+}
+
+// 13 params/row, so 100 rows is ~1,300 params — well inside Postgres' 65,535
+// limit while turning a full mapping run's writes from one round-trip per
+// candidate into one per hundred.
+const ATUM_BATCH_SIZE = 100;
+
+export async function upsertAtumMappings(inputs: AtumMappingInput[]): Promise<number> {
+  let written = 0;
+  for (const batch of chunk(inputs, ATUM_BATCH_SIZE)) {
+    const params: unknown[] = [];
+    const tuples = batch.map((input, i) => {
+      params.push(
+        input.datasetId, input.columnId, input.sourceValue, input.taxonomyVersion, input.layer,
+        input.categoryId ?? null, input.status, input.confidence, input.method, input.reasoning ?? null,
+        JSON.stringify(input.evidence ?? {}), JSON.stringify(input.alternatives ?? []), JSON.stringify(input.sourceContext ?? {})
+      );
+      const b = i * 13;
+      return `($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5},$${b + 6},$${b + 7},$${b + 8},$${b + 9},$${b + 10},$${b + 11}::jsonb,$${b + 12}::jsonb,$${b + 13}::jsonb)`;
+    });
+    const result = await getPool().query(
+      `insert into atum_mappings
+         (dataset_id,column_id,source_value,taxonomy_version,layer,category_id,status,confidence,method,reasoning,evidence,alternatives,source_context)
+       values ${tuples.join(", ")}
+       on conflict (dataset_id,column_id,source_value,taxonomy_version,layer) do update set
+         category_id=excluded.category_id, status=case when atum_mappings.status in ('approved','overridden') then atum_mappings.status else excluded.status end,
+         confidence=excluded.confidence, method=excluded.method, reasoning=excluded.reasoning,
+         evidence=excluded.evidence, alternatives=excluded.alternatives, source_context=excluded.source_context, updated_at=now()`,
+      params
+    );
+    written += result.rowCount ?? 0;
+  }
+  return written;
 }
 
 export async function clearAtumMappingsForLayer(layer: AtumLayer): Promise<number> {

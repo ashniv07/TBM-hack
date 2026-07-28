@@ -66,7 +66,7 @@ async function seed() {
             return;
           }
           await runUnderstanding(result.datasetId);
-          await runEmbedding(result.datasetId, { uploadsDir: UPLOAD_DIR });
+          await runEmbedding(result.datasetId, { uploadsDir: UPLOAD_DIR, rows: result.sheet?.rows });
           ingested++;
           console.log(`  [1-3] ${fileName} (${since(stepStart)})`);
         } catch (err) {

@@ -4,14 +4,21 @@ import { fetchSemanticMatches, SemanticMatch } from "../api";
 export function SemanticMatches() {
   const [matches, setMatches] = useState<SemanticMatch[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     fetchSemanticMatches()
       .then(setMatches)
+      // Without this, a failed request left matches empty and rendered the
+      // "no matches yet, upload more datasets" hint — telling the user to fix
+      // their data when the request is what broke.
+      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load semantic matches"))
       .finally(() => setLoading(false));
   }, []);
 
   if (loading) return <p>Loading...</p>;
+
+  if (error) return <p className="dq-error">Could not load semantic matches: {error}</p>;
 
   if (matches.length === 0) {
     return (
