@@ -400,11 +400,22 @@ export interface ApplyCorrectionChange {
   rowsAffected: number;
 }
 
+export interface CorrectedDatasetInfo {
+  id: string;
+  fileName: string;
+  storagePath: string;
+  status: string;
+  sourceType: string | null;
+}
+
 export interface ApplyCorrectionsResult {
   ok: boolean;
   originalFile: string;
   correctedFile: string;
   correctionsApplied: number;
+  originalDatasetId: string;
+  /** The new dataset registered from the corrected file - use for subsequent stages */
+  correctedDataset: CorrectedDatasetInfo | null;
   changes: ApplyCorrectionChange[];
 }
 
@@ -412,6 +423,17 @@ export interface ApplyAllCorrectionsResult {
   ok: boolean;
   results: ApplyCorrectionsResult[];
   errors: { datasetId: string; error: string }[];
+}
+
+export interface ProcessCorrectedResult {
+  ok: boolean;
+  datasetId: string;
+  fileName: string;
+  stages: {
+    understanding: { columnsClassified: number; relationshipsDetected: number };
+    embedding: { entitiesEmbedded: number };
+  };
+  message: string;
 }
 
 export async function applyCorrectionsToDataset(datasetId: string): Promise<ApplyCorrectionsResult> {
@@ -423,6 +445,17 @@ export async function applyCorrectionsToDataset(datasetId: string): Promise<Appl
 export async function applyAllCorrections(): Promise<ApplyAllCorrectionsResult> {
   const res = await fetch(`${API_BASE}/standardization/apply-all`, { method: "POST" });
   if (!res.ok) throw new Error(`Failed to apply all corrections: ${res.statusText}`);
+  return res.json();
+}
+
+/**
+ * Process a corrected dataset through Stages 2-3 (Understanding + Embedding)
+ * This integrates the corrected data into the knowledge graph, making it ready
+ * for Stage 4 (Context), Stage 6 (ATUM), and Stage 7 (TBM Export).
+ */
+export async function processCorrectedDataset(datasetId: string): Promise<ProcessCorrectedResult> {
+  const res = await fetch(`${API_BASE}/standardization/process-corrected/${datasetId}`, { method: "POST" });
+  if (!res.ok) throw new Error(`Failed to process corrected dataset: ${res.statusText}`);
   return res.json();
 }
 
@@ -510,4 +543,294 @@ export async function reviewAtumMapping(id: string, action: "approve" | "reject"
   });
   if (!res.ok) throw new Error("Failed to review ATUM mapping");
   return res.json();
+}
+
+// ---------- Stage 7: TBM Data Model Export ----------
+
+export type TbmExportType = "full" | "cost_centers" | "applications" | "vendors" | "cloud_resources" | "allocations";
+export type TbmExportFormat = "json" | "csv" | "xlsx";
+
+export interface TbmExport {
+  id: string;
+  export_type: TbmExportType;
+  status: "pending" | "running" | "completed" | "failed";
+  format: TbmExportFormat;
+  include_unmapped: boolean;
+  include_low_confidence: boolean;
+  confidence_threshold: number;
+  file_path: string | null;
+  record_count: number | null;
+  error_message: string | null;
+  created_at: string;
+  completed_at: string | null;
+}
+
+export interface TbmCostCenter {
+  cost_center_code: string;
+  cost_center_name: string;
+  parent_cost_center_code: string | null;
+  business_unit_code: string | null;
+  business_unit_name: string | null;
+  department_code: string | null;
+  department_name: string | null;
+  confidence: number;
+}
+
+export interface TbmApplication {
+  application_id: string;
+  application_name: string;
+  vendor_name: string | null;
+  business_unit_code: string | null;
+  cost_center_code: string | null;
+  atum_tower: string | null;
+  atum_sub_tower: string | null;
+  atum_service_domain: string | null;
+  atum_confidence: number | null;
+  confidence: number;
+}
+
+export interface TbmVendor {
+  vendor_id: string;
+  vendor_name: string;
+  vendor_type: string | null;
+  atum_cost_pool: string | null;
+  atum_confidence: number | null;
+  confidence: number;
+}
+
+export interface TbmCloudResource {
+  resource_id: string;
+  resource_name: string;
+  resource_type: string | null;
+  cloud_provider: string | null;
+  region: string | null;
+  account_id: string | null;
+  atum_tower: string | null;
+  atum_sub_tower: string | null;
+  atum_confidence: number | null;
+  application_id: string | null;
+  confidence: number;
+}
+
+export interface TbmDataModel {
+  costCenters: TbmCostCenter[];
+  applications: TbmApplication[];
+  vendors: TbmVendor[];
+  cloudResources: TbmCloudResource[];
+  metadata: {
+    exportId: string;
+    exportedAt: string;
+    totalRecords: number;
+    taxonomyVersion: string;
+  };
+}
+
+export interface TbmExportSummary {
+  costCenters: number;
+  applications: number;
+  vendors: number;
+  cloudResources: number;
+  businessUnits: number;
+  departments: number;
+  atumMappedEntities: number;
+  totalEntities: number;
+  totalEdges: number;
+  readyForExport: boolean;
+}
+
+export interface TbmGenerateResult {
+  ok: boolean;
+  exportId: string;
+  recordCount: number;
+  model: TbmDataModel;
+  filePath?: string;
+}
+
+export async function fetchTbmExportSummary(): Promise<TbmExportSummary> {
+  const res = await fetch(`${API_BASE}/tbm-export/preview/summary`);
+  if (!res.ok) throw new Error("Failed to fetch TBM export summary");
+  return res.json();
+}
+
+export async function generateTbmExport(options: {
+  exportType?: TbmExportType;
+  format?: TbmExportFormat;
+  includeUnmapped?: boolean;
+  includeLowConfidence?: boolean;
+  confidenceThreshold?: number;
+  saveFile?: boolean;
+}): Promise<TbmGenerateResult> {
+  const res = await fetch(`${API_BASE}/tbm-export/generate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(options),
+  });
+  if (!res.ok) throw new Error((await res.json()).error ?? "TBM export failed");
+  return res.json();
+}
+
+export async function fetchTbmExports(): Promise<TbmExport[]> {
+  const res = await fetch(`${API_BASE}/tbm-export/list`);
+  if (!res.ok) throw new Error("Failed to fetch TBM exports");
+  return (await res.json()).exports;
+}
+
+export async function fetchTbmExportDetail(id: string): Promise<{ export: TbmExport; model: TbmDataModel | null }> {
+  const res = await fetch(`${API_BASE}/tbm-export/${id}`);
+  if (!res.ok) throw new Error("Failed to fetch TBM export");
+  return res.json();
+}
+
+export async function downloadTbmExport(id: string, format: TbmExportFormat): Promise<void> {
+  const res = await fetch(`${API_BASE}/tbm-export/${id}/download?format=${format}`);
+  if (!res.ok) throw new Error("Failed to download TBM export");
+
+  const contentType = res.headers.get("Content-Type") || "";
+  const disposition = res.headers.get("Content-Disposition") || "";
+  const filenameMatch = disposition.match(/filename="(.+)"/);
+  const filename = filenameMatch ? filenameMatch[1] : `tbm_export.${format}`;
+
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// ---------- Stage 8: AI Assistant ----------
+
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+  sources?: { type: string; id: string; name: string }[];
+}
+
+export interface ChatSession {
+  id: string;
+  title: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChatResponse {
+  sessionId: string;
+  message: ChatMessage;
+  processingTime: number;
+}
+
+export interface ChatSuggestion {
+  category: string;
+  prompt: string;
+}
+
+export async function sendChatMessage(message: string, sessionId?: string): Promise<ChatResponse> {
+  const res = await fetch(`${API_BASE}/assistant/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message, sessionId }),
+  });
+  if (!res.ok) throw new Error((await res.json()).error ?? "Chat failed");
+  return res.json();
+}
+
+export async function fetchChatSessions(): Promise<ChatSession[]> {
+  const res = await fetch(`${API_BASE}/assistant/sessions`);
+  if (!res.ok) throw new Error("Failed to fetch chat sessions");
+  return (await res.json()).sessions;
+}
+
+export async function fetchChatHistory(sessionId: string): Promise<{ session: ChatSession; messages: ChatMessage[] }> {
+  const res = await fetch(`${API_BASE}/assistant/sessions/${sessionId}`);
+  if (!res.ok) throw new Error("Failed to fetch chat history");
+  return res.json();
+}
+
+export async function fetchChatSuggestions(): Promise<ChatSuggestion[]> {
+  const res = await fetch(`${API_BASE}/assistant/suggestions`);
+  if (!res.ok) throw new Error("Failed to fetch suggestions");
+  return (await res.json()).suggestions;
+}
+
+// ---------- Stage 9: Analytics Dashboard ----------
+
+export interface AnalyticsOverview {
+  summary: {
+    totalDatasets: number;
+    totalRows: number;
+    totalEntities: number;
+    totalEdges: number;
+    totalIssues: number;
+    openIssues: number;
+    totalMappings: number;
+    approvedMappings: number;
+    avgReadiness: number;
+    atumCoverage: number;
+  };
+  dataQuality: {
+    issuesByType: Record<string, number>;
+    issuesBySeverity: Record<string, number>;
+    readinessDistribution: {
+      excellent: number;
+      good: number;
+      fair: number;
+      poor: number;
+    };
+    avgScores: {
+      completeness: number;
+      validity: number;
+      consistency: number;
+      uniqueness: number;
+    };
+  };
+  atumMapping: {
+    mappingsByStatus: Record<string, number>;
+    mappingsByLayer: Record<string, number>;
+    mappingsByTower: Record<string, number>;
+    coverage: number;
+  };
+  knowledgeGraph: {
+    entityTypes: Record<string, number>;
+    edgeTypes: Record<string, number>;
+  };
+  datasets: {
+    sourceTypes: Record<string, number>;
+    byStatus: Record<string, number>;
+  };
+}
+
+export interface DatasetAnalytics {
+  id: string;
+  fileName: string;
+  sourceType: string | null;
+  status: string;
+  rowCount: number | null;
+  uploadedAt: string;
+  readiness: {
+    overall: number;
+    completeness: number;
+    validity: number;
+    consistency: number;
+    uniqueness: number;
+  } | null;
+  issues: {
+    total: number;
+    critical: number;
+    open: number;
+  };
+}
+
+export async function fetchAnalyticsOverview(): Promise<AnalyticsOverview> {
+  const res = await fetch(`${API_BASE}/analytics/overview`);
+  if (!res.ok) throw new Error("Failed to fetch analytics");
+  return res.json();
+}
+
+export async function fetchDatasetAnalytics(): Promise<DatasetAnalytics[]> {
+  const res = await fetch(`${API_BASE}/analytics/datasets`);
+  if (!res.ok) throw new Error("Failed to fetch dataset analytics");
+  return (await res.json()).datasets;
 }

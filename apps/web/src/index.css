@@ -645,3 +645,649 @@ code {
   margin: 0.5rem 0 0 1rem;
   padding: 0;
 }
+
+.dq-apply-info {
+  margin: 0.5rem 0 1rem;
+  padding: 0.75rem;
+  background: #1a3d4d;
+  border-radius: 6px;
+  color: #8ecae6;
+  font-size: 0.9rem;
+}
+
+.dq-process-all {
+  margin-bottom: 1rem;
+}
+
+.process-all-btn {
+  background: #4a9d5a;
+  color: white;
+}
+
+.process-all-btn:hover:not(:disabled) {
+  background: #3a8d4a;
+}
+
+.apply-result-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.corrected-dataset-actions {
+  flex-shrink: 0;
+}
+
+.process-btn {
+  background: #4a9d5a;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.85rem;
+}
+
+.process-btn:hover:not(:disabled) {
+  background: #3a8d4a;
+}
+
+.process-success {
+  color: #6fd694;
+  font-size: 0.85rem;
+}
+
+.corrected-dataset-info {
+  display: flex;
+  gap: 1rem;
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+  color: #9aa2ad;
+}
+
+.corrected-dataset-info .dataset-id {
+  font-family: monospace;
+}
+
+.corrected-dataset-info .source-type {
+  color: #8ecae6;
+}
+
+/* ---------- Stage 7: TBM Data Model Export ---------- */
+
+.tbm-export-dashboard {
+  margin-top: 1rem;
+}
+
+.tbm-preview,
+.tbm-generate,
+.tbm-history {
+  margin-top: 1rem;
+}
+
+.tbm-readiness {
+  margin: 1rem 0;
+}
+
+.tbm-breakdown {
+  margin-top: 1.5rem;
+}
+
+.tbm-breakdown h5 {
+  margin-bottom: 0.5rem;
+}
+
+.tbm-breakdown table {
+  max-width: 300px;
+}
+
+.tbm-export-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+  margin: 1rem 0;
+  padding: 1rem;
+  background: #14171d;
+  border: 1px solid #262a33;
+  border-radius: 8px;
+}
+
+.tbm-export-options .option-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.tbm-export-options label {
+  color: #9aa2ad;
+  font-size: 0.85rem;
+}
+
+.tbm-export-options select {
+  background: #1a1d24;
+  color: #e6e8eb;
+  border: 1px solid #3a3f4b;
+  border-radius: 4px;
+  padding: 0.4rem 0.6rem;
+  min-width: 200px;
+}
+
+.tbm-export-options input[type="range"] {
+  width: 200px;
+}
+
+.tbm-export-actions {
+  margin: 1rem 0;
+}
+
+.tbm-export-result {
+  margin-top: 1.5rem;
+  padding: 1rem;
+  background: #14171d;
+  border: 1px solid #262a33;
+  border-radius: 8px;
+}
+
+.tbm-export-result h5 {
+  margin-top: 0;
+  margin-bottom: 1rem;
+}
+
+.tbm-export-result details {
+  margin-top: 1rem;
+}
+
+.tbm-export-result summary {
+  cursor: pointer;
+  color: #6fb8ef;
+  margin-bottom: 0.5rem;
+}
+
+.tbm-history table {
+  margin-top: 1rem;
+}
+
+.tbm-history button {
+  background: #262a33;
+  font-size: 0.8rem;
+  padding: 0.25rem 0.5rem;
+  margin-right: 0.35rem;
+}
+
+.tbm-history button:hover:not(:disabled) {
+  background: #323744;
+}
+
+/* ---------- Stage 8: AI Assistant ---------- */
+
+.assistant-container {
+  display: flex;
+  border: 1px solid #262a33;
+  border-radius: 8px;
+  height: 500px;
+  overflow: hidden;
+}
+
+.assistant-sidebar {
+  width: 200px;
+  background: #14171d;
+  border-right: 1px solid #262a33;
+  display: flex;
+  flex-direction: column;
+}
+
+.new-chat-btn {
+  margin: 0.75rem;
+  background: #5b8def;
+}
+
+.session-list {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.session-item {
+  padding: 0.75rem;
+  cursor: pointer;
+  border-bottom: 1px solid #262a33;
+}
+
+.session-item:hover,
+.session-item.active {
+  background: #1a1d24;
+}
+
+.session-title {
+  display: block;
+  font-size: 0.85rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-date {
+  font-size: 0.75rem;
+  color: #9aa2ad;
+}
+
+.assistant-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.messages-container {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1rem;
+}
+
+.assistant-welcome {
+  text-align: center;
+  padding: 2rem;
+}
+
+.assistant-welcome h3 {
+  margin-bottom: 0.5rem;
+}
+
+.assistant-welcome p {
+  color: #9aa2ad;
+  margin-bottom: 1.5rem;
+}
+
+.suggestions-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+  justify-content: center;
+  text-align: left;
+}
+
+.suggestion-category h4 {
+  color: #9aa2ad;
+  font-size: 0.8rem;
+  margin-bottom: 0.5rem;
+  text-transform: uppercase;
+}
+
+.suggestion-btn {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: #262a33;
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 0.35rem;
+  font-size: 0.85rem;
+}
+
+.suggestion-btn:hover:not(:disabled) {
+  background: #323744;
+}
+
+.message {
+  margin-bottom: 1rem;
+  display: flex;
+  flex-direction: column;
+}
+
+.message.user {
+  align-items: flex-end;
+}
+
+.message.assistant {
+  align-items: flex-start;
+}
+
+.message-content {
+  max-width: 80%;
+  padding: 0.75rem 1rem;
+  border-radius: 12px;
+  line-height: 1.5;
+}
+
+.message.user .message-content {
+  background: #5b8def;
+  color: white;
+  border-bottom-right-radius: 4px;
+}
+
+.message.assistant .message-content {
+  background: #262a33;
+  border-bottom-left-radius: 4px;
+}
+
+.message.assistant .message-content p {
+  margin: 0 0 0.5rem 0;
+}
+
+.message.assistant .message-content p:last-child {
+  margin-bottom: 0;
+}
+
+.message.assistant .message-content ul {
+  margin: 0.5rem 0;
+  padding-left: 1.25rem;
+}
+
+.message.assistant .message-content li {
+  margin-bottom: 0.25rem;
+}
+
+.message-sources {
+  font-size: 0.75rem;
+  color: #9aa2ad;
+  margin-top: 0.35rem;
+}
+
+.source-tag {
+  display: inline-block;
+  background: #1e2a3f;
+  color: #7fb0f5;
+  padding: 0.1rem 0.4rem;
+  border-radius: 3px;
+  margin-left: 0.35rem;
+}
+
+.typing span {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  background: #9aa2ad;
+  border-radius: 50%;
+  margin-right: 4px;
+  animation: typing 1s infinite;
+}
+
+.typing span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.typing span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes typing {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
+}
+
+.assistant-error {
+  background: #2f2222;
+  color: #ef6f6f;
+  padding: 0.5rem 1rem;
+  font-size: 0.85rem;
+}
+
+.input-container {
+  display: flex;
+  gap: 0.5rem;
+  padding: 1rem;
+  border-top: 1px solid #262a33;
+  background: #14171d;
+}
+
+.input-container textarea {
+  flex: 1;
+  background: #1a1d24;
+  color: #e6e8eb;
+  border: 1px solid #3a3f4b;
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.9rem;
+  resize: none;
+  min-height: 40px;
+  max-height: 120px;
+}
+
+.input-container textarea:focus {
+  outline: none;
+  border-color: #5b8def;
+}
+
+.input-container button {
+  padding: 0.5rem 1.25rem;
+}
+
+/* ---------- Stage 9: Analytics Dashboard ---------- */
+
+.analytics-dashboard {
+  margin-top: 1rem;
+}
+
+.analytics-overview,
+.analytics-quality,
+.analytics-atum,
+.analytics-datasets {
+  margin-top: 1rem;
+}
+
+.analytics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 1.5rem;
+  margin-top: 1.5rem;
+}
+
+.analytics-section {
+  background: #14171d;
+  border: 1px solid #262a33;
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.analytics-section.full-width {
+  grid-column: 1 / -1;
+}
+
+.analytics-section h4 {
+  margin-top: 0;
+  margin-bottom: 1rem;
+  color: #9aa2ad;
+  font-size: 0.9rem;
+  text-transform: uppercase;
+}
+
+.bar-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.bar-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.bar-label {
+  width: 120px;
+  font-size: 0.85rem;
+  color: #c9cdd4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bar-container {
+  flex: 1;
+  height: 20px;
+  background: #1a1d24;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.bar {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.bar-value {
+  width: 40px;
+  text-align: right;
+  font-size: 0.85rem;
+  color: #9aa2ad;
+}
+
+.severity-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.severity-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.severity-label {
+  width: 60px;
+  font-size: 0.85rem;
+  text-transform: capitalize;
+}
+
+.severity-item.severity-critical .severity-label { color: #ef6f6f; }
+.severity-item.severity-error .severity-label { color: #e0a060; }
+.severity-item.severity-warning .severity-label { color: #e0c460; }
+.severity-item.severity-info .severity-label { color: #6fb8ef; }
+
+.severity-bar-container {
+  flex: 1;
+  height: 16px;
+  background: #1a1d24;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.severity-item.severity-critical .severity-bar { background: #ef6f6f; }
+.severity-item.severity-error .severity-bar { background: #e0a060; }
+.severity-item.severity-warning .severity-bar { background: #e0c460; }
+.severity-item.severity-info .severity-bar { background: #6fb8ef; }
+
+.severity-bar {
+  height: 100%;
+  border-radius: 4px;
+}
+
+.severity-count {
+  width: 30px;
+  text-align: right;
+  font-size: 0.85rem;
+  color: #9aa2ad;
+}
+
+.readiness-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.75rem;
+}
+
+.readiness-item {
+  text-align: center;
+  padding: 0.75rem;
+  border-radius: 6px;
+  background: #1a1d24;
+}
+
+.readiness-item.excellent { border-left: 3px solid #6fd694; }
+.readiness-item.good { border-left: 3px solid #6fb8ef; }
+.readiness-item.fair { border-left: 3px solid #e0c460; }
+.readiness-item.poor { border-left: 3px solid #ef6f6f; }
+
+.readiness-value {
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+
+.readiness-label {
+  font-size: 0.75rem;
+  color: #9aa2ad;
+  margin-top: 0.25rem;
+}
+
+.dimension-scores {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.dimension-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.dimension-header {
+  display: flex;
+  justify-content: space-between;
+}
+
+.dimension-label {
+  font-size: 0.85rem;
+  color: #c9cdd4;
+  text-transform: capitalize;
+}
+
+.dimension-value {
+  font-size: 0.85rem;
+  color: #e6e8eb;
+}
+
+.dimension-bar-container {
+  height: 8px;
+  background: #1a1d24;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.dimension-bar {
+  height: 100%;
+  border-radius: 4px;
+}
+
+.status-breakdown {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.status-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: #1a1d24;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+}
+
+.status-item .status-label {
+  font-size: 0.85rem;
+  text-transform: capitalize;
+}
+
+.status-item .status-count {
+  font-weight: 600;
+}
+
+.status-item.status-approved .status-label { color: #6fd694; }
+.status-item.status-suggested .status-label { color: #e0c460; }
+.status-item.status-unresolved .status-label { color: #ef6f6f; }
+.status-item.status-rejected .status-label { color: #9aa2ad; }
+.status-item.status-overridden .status-label { color: #6fb8ef; }
+
+.mini-readiness {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.mini-readiness-bar {
+  width: 60px;
+  height: 8px;
+  background: #1a1d24;
+  border-radius: 4px;
+  position: relative;
+}
+
+.analytics-datasets table {
+  margin-top: 1rem;
+}

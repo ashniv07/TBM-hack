@@ -160,28 +160,70 @@ review, and approve / reject / override each update the knowledge graph.
 - Supports approve, reject, and manual override actions with reviewer timestamps
 - Stores alternatives, evidence, method, confidence, and taxonomy version for every result
 
-### Stage 7 — TBM Data Model Generation
-The validated and standardized datasets are transformed into an Apptio-ready TBM data model. Relationships between cost centers, business units, applications, cloud resources, vendors, and financial transactions are preserved, enabling accurate financial modeling within IBM Apptio.
+### Stage 7 — TBM Data Model Generation *(implemented)*
+The validated and standardized datasets are transformed into an Apptio-ready TBM data model.
 
-### Stage 8 — AI Assistant
+**Export Capabilities:**
+- Cost Centers dimension with hierarchy
+- Applications with ATUM tower classification
+- Vendors with cost pool mapping
+- Cloud Resources with provider and tower classification
+
+**Export Formats:**
+- Excel (.xlsx) with multiple sheets
+- JSON for programmatic access
+- CSV for data integration
+
+**Features:**
+- Configurable confidence threshold for ATUM mappings
+- Include/exclude low-confidence mappings
+- Export history with re-download capability
+- Preview before export
+
+### Stage 8 — AI Assistant *(implemented)*
 An AI assistant enables consultants and business users to interact with the platform using natural language.
 
-Example queries include:
-- Why was this mapped to Cloud Compute?
-- Which datasets contain quality issues?
-- Why is the readiness score low?
-- Show unmapped services.
-- Explain this allocation.
-- Recommend fixes.
+**Supported Queries:**
+- "Why was [entity] mapped to [category]?" — Explains ATUM mapping reasoning
+- "Which datasets have quality issues?" — Lists datasets with open issues
+- "Why is the readiness score low?" — Analyzes readiness breakdown
+- "Show unmapped services" — Lists unresolved ATUM mappings
+- "Recommend fixes" — Prioritizes corrections by severity
+- "Tell me about [entity]" — Entity info with ATUM classification
+- "Show summary" — Platform overview dashboard
 
-The assistant leverages the Enterprise Context Model, historical mappings, and RAG to provide explainable responses.
+**Features:**
+- Persistent chat sessions with history
+- Source citations for answers
+- Suggested prompts for quick start
+- Context-aware responses using knowledge graph
 
-### Stage 9 — Analytics Dashboard
+### Stage 9 — Analytics Dashboard *(implemented)*
 The platform provides interactive dashboards for:
-- **Data Quality** — TBM Readiness Score, missing values, duplicate records, relationship quality, mapping coverage
-- **Financial Insights** — cost by tower, business unit, application, cloud provider
-- **Trend Analysis** — month-over-month spending, cost spikes, outlier detection, new service identification
-- **AI Insights** — mapping confidence, high-risk datasets, recommended fixes, explainability reports
+
+**Overview Tab:**
+- Key metrics: datasets, rows, entities, relationships
+- Source type distribution
+- Entity type breakdown
+- Average readiness and ATUM coverage
+
+**Data Quality Tab:**
+- Issues by severity (critical, error, warning, info)
+- Issues by type (missing values, duplicates, invalid references, etc.)
+- Readiness distribution (excellent, good, fair, poor)
+- Quality dimension scores (completeness, validity, consistency, uniqueness)
+
+**ATUM Coverage Tab:**
+- Mappings by status (approved, suggested, unresolved, rejected)
+- Mappings by layer (resource_tower, cost_pool, solution)
+- Top towers distribution
+- Overall coverage percentage
+
+**Datasets Tab:**
+- Per-dataset health overview
+- Readiness bars with color coding
+- Issue counts with critical highlighting
+- Processing status
 
 ## Steps to Run
 
@@ -302,3 +344,22 @@ After uploading datasets and running Stages 1-4:
 - `POST /api/atum/mappings/:id/reject` — Reject a suggestion
 - `POST /api/atum/mappings/:id/override` — Select a different official category
 - `GET /api/atum/report` — Coverage, confidence, status, and tower summary
+
+**Stage 7 — TBM Export:**
+- `POST /api/tbm-export/generate` — Generate TBM data model export
+- `GET /api/tbm-export/list` — List all exports
+- `GET /api/tbm-export/:id` — Get export details and data
+- `GET /api/tbm-export/:id/download?format=` — Download in JSON, CSV, or XLSX
+- `GET /api/tbm-export/preview/summary` — Preview export readiness
+- `GET /api/tbm-export/preview/knowledge-graph` — Knowledge graph statistics
+
+**Stage 8 — AI Assistant:**
+- `POST /api/assistant/chat` — Send message to AI assistant
+- `GET /api/assistant/sessions` — List chat sessions
+- `GET /api/assistant/sessions/:id` — Get session with messages
+- `PATCH /api/assistant/sessions/:id` — Update session title
+- `GET /api/assistant/suggestions` — Get suggested prompts
+
+**Stage 9 — Analytics:**
+- `GET /api/analytics/overview` — Platform-wide analytics summary
+- `GET /api/analytics/datasets` — Per-dataset analytics

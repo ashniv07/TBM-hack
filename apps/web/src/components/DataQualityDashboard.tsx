@@ -14,8 +14,11 @@ import {
   rejectCorrection,
   bulkApproveCorrections,
   applyAllCorrections,
+  processCorrectedDataset,
   StandardizationStats,
   ApplyAllCorrectionsResult,
+  ProcessCorrectedResult,
+  CorrectedDatasetInfo,
 } from "../api";
 
 type TabView = "overview" | "issues" | "corrections" | "readiness";
@@ -34,6 +37,8 @@ export function DataQualityDashboard() {
   const [error, setError] = useState<string | null>(null);
   const [applyResult, setApplyResult] = useState<ApplyAllCorrectionsResult | null>(null);
   const [applying, setApplying] = useState(false);
+  const [processingDatasets, setProcessingDatasets] = useState<Set<string>>(new Set());
+  const [processedResults, setProcessedResults] = useState<Map<string, ProcessCorrectedResult>>(new Map());
 
   async function handleRunStandardization() {
     setBusy(true);
@@ -112,6 +117,7 @@ export function DataQualityDashboard() {
     setApplying(true);
     setError(null);
     setApplyResult(null);
+    setProcessedResults(new Map());
     try {
       const result = await applyAllCorrections();
       setApplyResult(result);
@@ -122,6 +128,34 @@ export function DataQualityDashboard() {
       setError(err instanceof Error ? err.message : "Failed to apply corrections");
     } finally {
       setApplying(false);
+    }
+  }
+
+  async function handleProcessCorrectedDataset(datasetId: string) {
+    setProcessingDatasets((prev) => new Set([...prev, datasetId]));
+    setError(null);
+    try {
+      const result = await processCorrectedDataset(datasetId);
+      setProcessedResults((prev) => new Map(prev).set(datasetId, result));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to process corrected dataset");
+    } finally {
+      setProcessingDatasets((prev) => {
+        const next = new Set(prev);
+        next.delete(datasetId);
+        return next;
+      });
+    }
+  }
+
+  async function handleProcessAllCorrectedDatasets() {
+    if (!applyResult) return;
+    const datasets = applyResult.results
+      .map((r) => r.correctedDataset)
+      .filter((d): d is CorrectedDatasetInfo => d !== null);
+
+    for (const dataset of datasets) {
+      await handleProcessCorrectedDataset(dataset.id);
     }
   }
 
@@ -374,15 +408,58 @@ export function DataQualityDashboard() {
 
               {applyResult && (
                 <div className={`dq-apply-result ${applyResult.ok ? "success" : "partial"}`}>
-                  <h4>Corrections Applied</h4>
+                  <h4>Corrections Applied - New Corrected Files Created</h4>
+                  <p className="dq-apply-info">
+                    The corrected files are registered as new datasets. Process them through Stages 2-3 to integrate
+                    the cleaned data into the knowledge graph for ATUM mapping and TBM export.
+                  </p>
+                  {applyResult.results.some((r) => r.correctedDataset) && (
+                    <div className="dq-process-all">
+                      <button
+                        onClick={handleProcessAllCorrectedDatasets}
+                        disabled={processingDatasets.size > 0}
+                        className="process-all-btn"
+                      >
+                        {processingDatasets.size > 0
+                          ? `Processing ${processingDatasets.size} dataset(s)...`
+                          : "Process All Corrected Datasets for TBM"}
+                      </button>
+                    </div>
+                  )}
                   {applyResult.results.map((r, idx) => (
                     <div key={idx} className="apply-result-item">
-                      <p>
-                        <strong>Created:</strong> {r.correctedFile.split("/").pop()}
-                      </p>
+                      <div className="apply-result-header">
+                        <p>
+                          <strong>Created:</strong> {r.correctedFile.split("/").pop()}
+                        </p>
+                        {r.correctedDataset && (
+                          <div className="corrected-dataset-actions">
+                            {processedResults.has(r.correctedDataset.id) ? (
+                              <span className="process-success">
+                                Processed: {processedResults.get(r.correctedDataset.id)!.stages.embedding.entitiesEmbedded} entities embedded
+                              </span>
+                            ) : (
+                              <button
+                                onClick={() => handleProcessCorrectedDataset(r.correctedDataset!.id)}
+                                disabled={processingDatasets.has(r.correctedDataset.id)}
+                                className="process-btn"
+                              >
+                                {processingDatasets.has(r.correctedDataset.id) ? "Processing..." : "Process for TBM"}
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
                       <p className="samples">
                         {r.correctionsApplied} correction(s) applied, {r.changes.reduce((sum, c) => sum + c.rowsAffected, 0)} rows modified
                       </p>
+                      {r.correctedDataset && (
+                        <div className="corrected-dataset-info">
+                          <span className="dataset-id">Dataset ID: {r.correctedDataset.id.slice(0, 8)}...</span>
+                          <span className="source-type">{r.correctedDataset.sourceType ?? "Unknown type"}</span>
+                          <span className={`status-badge status-${r.correctedDataset.status}`}>{r.correctedDataset.status}</span>
+                        </div>
+                      )}
                       {r.changes.length > 0 && (
                         <ul className="change-list">
                           {r.changes.map((change, i) => (

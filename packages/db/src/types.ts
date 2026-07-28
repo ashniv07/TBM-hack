@@ -292,3 +292,151 @@ export interface AtumMappingView extends AtumMapping {
   level_2: string | null;
   level_3: string | null;
 }
+
+// ---------- Stage 7: TBM Data Model Export ----------
+
+export type TbmExportType = "full" | "cost_centers" | "applications" | "vendors" | "cloud_resources" | "allocations";
+export type TbmExportStatus = "pending" | "running" | "completed" | "failed";
+export type TbmExportFormat = "json" | "csv" | "xlsx";
+
+export interface TbmExport {
+  id: string;
+  export_type: TbmExportType;
+  status: TbmExportStatus;
+  format: TbmExportFormat;
+  include_unmapped: boolean;
+  include_low_confidence: boolean;
+  confidence_threshold: number;
+  file_path: string | null;
+  record_count: number | null;
+  error_message: string | null;
+  created_by: string | null;
+  created_at: string;
+  completed_at: string | null;
+}
+
+export interface TbmCostCenter {
+  id: string;
+  export_id: string | null;
+  cost_center_code: string;
+  cost_center_name: string;
+  parent_cost_center_code: string | null;
+  business_unit_code: string | null;
+  business_unit_name: string | null;
+  department_code: string | null;
+  department_name: string | null;
+  source_entity_id: string | null;
+  confidence: number;
+}
+
+export interface TbmApplication {
+  id: string;
+  export_id: string | null;
+  application_id: string;
+  application_name: string;
+  vendor_name: string | null;
+  business_unit_code: string | null;
+  cost_center_code: string | null;
+  atum_tower: string | null;
+  atum_sub_tower: string | null;
+  atum_service_domain: string | null;
+  atum_confidence: number | null;
+  source_entity_id: string | null;
+  atum_mapping_id: string | null;
+  confidence: number;
+}
+
+export interface TbmVendor {
+  id: string;
+  export_id: string | null;
+  vendor_id: string;
+  vendor_name: string;
+  vendor_type: string | null;
+  atum_cost_pool: string | null;
+  atum_confidence: number | null;
+  source_entity_id: string | null;
+  confidence: number;
+}
+
+export interface TbmCloudResource {
+  id: string;
+  export_id: string | null;
+  resource_id: string;
+  resource_name: string;
+  resource_type: string | null;
+  cloud_provider: string | null;
+  region: string | null;
+  account_id: string | null;
+  atum_tower: string | null;
+  atum_sub_tower: string | null;
+  atum_confidence: number | null;
+  application_id: string | null;
+  source_entity_id: string | null;
+  atum_mapping_id: string | null;
+  confidence: number;
+}
+
+export interface TbmCostAllocation {
+  id: string;
+  export_id: string | null;
+  cost_center_code: string;
+  application_id: string | null;
+  vendor_id: string | null;
+  cloud_resource_id: string | null;
+  atum_tower: string | null;
+  atum_sub_tower: string | null;
+  amount: number;
+  currency: string;
+  period_start: string | null;
+  period_end: string | null;
+  source_dataset_id: string | null;
+  source_row_index: number | null;
+}
+
+export interface TbmDataModel {
+  costCenters: TbmCostCenter[];
+  applications: TbmApplication[];
+  vendors: TbmVendor[];
+  cloudResources: TbmCloudResource[];
+  allocations: TbmCostAllocation[];
+  metadata: {
+    exportId: string;
+    exportedAt: string;
+    totalRecords: number;
+    taxonomyVersion: string;
+  };
+}
+
+// ---------- Stage 8: AI Assistant ----------
+
+export type AssistantRole = "user" | "assistant" | "system";
+
+export interface AssistantSession {
+  id: string;
+  title: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AssistantMessage {
+  id: string;
+  session_id: string;
+  role: AssistantRole;
+  content: string;
+  metadata: {
+    sources?: { type: string; id: string; name: string }[];
+    toolCalls?: { tool: string; args: Record<string, unknown> }[];
+    processingTime?: number;
+  } | null;
+  created_at: string;
+}
+
+export interface AssistantQueryCache {
+  id: string;
+  query_text: string;
+  response_summary: string | null;
+  sources: unknown[] | null;
+  hit_count: number;
+  created_at: string;
+}

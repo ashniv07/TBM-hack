@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { runStandardization, applyCorrectionsToDataset, applyAllApprovedCorrections } from "@tbm/langgraph";
+import { runStandardization, applyCorrectionsToDataset, applyAllApprovedCorrections, runUnderstanding, runEmbedding } from "@tbm/langgraph";
 import {
   getCanonicalSchemas,
   getQualityIssues,
@@ -11,6 +11,8 @@ import {
   markCorrectionApplied,
   getReadinessScores,
   getReadinessScore,
+  getDataset,
+  updateDatasetStatus,
   IssueStatus,
   CorrectionStatus,
 } from "@tbm/db";
@@ -284,6 +286,7 @@ standardizationRouter.get("/report", async (req, res) => {
 });
 
 // POST /api/standardization/apply/:datasetId - Apply approved corrections to a dataset (safe mode)
+// Creates a new corrected file and registers it as a new dataset for subsequent stages
 standardizationRouter.post("/apply/:datasetId", async (req, res) => {
   try {
     const result = await applyCorrectionsToDataset(req.params.datasetId, UPLOAD_DIR);
@@ -292,6 +295,15 @@ standardizationRouter.post("/apply/:datasetId", async (req, res) => {
       originalFile: result.originalFile,
       correctedFile: result.correctedFile,
       correctionsApplied: result.correctionsApplied,
+      originalDatasetId: result.originalDatasetId,
+      // The corrected dataset is registered and ready for Stage 6 (ATUM) and Stage 7 (TBM Export)
+      correctedDataset: result.correctedDataset ? {
+        id: result.correctedDataset.id,
+        fileName: result.correctedDataset.file_name,
+        storagePath: result.correctedDataset.storage_path,
+        status: result.correctedDataset.status,
+        sourceType: result.correctedDataset.source_type,
+      } : null,
       changes: result.changes,
     });
   } catch (err) {
@@ -303,6 +315,7 @@ standardizationRouter.post("/apply/:datasetId", async (req, res) => {
 });
 
 // POST /api/standardization/apply-all - Apply all approved corrections across all datasets
+// Creates new corrected files and registers them as new datasets for subsequent stages
 standardizationRouter.post("/apply-all", async (req, res) => {
   try {
     const { results, errors } = await applyAllApprovedCorrections(UPLOAD_DIR);
@@ -312,6 +325,15 @@ standardizationRouter.post("/apply-all", async (req, res) => {
         originalFile: r.originalFile,
         correctedFile: r.correctedFile,
         correctionsApplied: r.correctionsApplied,
+        originalDatasetId: r.originalDatasetId,
+        // The corrected dataset is registered and ready for Stage 6 (ATUM) and Stage 7 (TBM Export)
+        correctedDataset: r.correctedDataset ? {
+          id: r.correctedDataset.id,
+          fileName: r.correctedDataset.file_name,
+          storagePath: r.correctedDataset.storage_path,
+          status: r.correctedDataset.status,
+          sourceType: r.correctedDataset.source_type,
+        } : null,
         changes: r.changes,
       })),
       errors,
@@ -320,6 +342,62 @@ standardizationRouter.post("/apply-all", async (req, res) => {
     console.error("Failed to apply all corrections:", err);
     res.status(500).json({
       error: err instanceof Error ? err.message : "Failed to apply all corrections",
+    });
+  }
+});
+
+// POST /api/standardization/process-corrected/:datasetId - Process a corrected dataset through Stages 2-3
+// This runs Understanding (Stage 2) and Embedding (Stage 3) on the corrected dataset
+// so it becomes fully integrated into the knowledge graph and ready for ATUM mapping
+standardizationRouter.post("/process-corrected/:datasetId", async (req, res) => {
+  try {
+    const datasetId = req.params.datasetId;
+    const dataset = await getDataset(datasetId);
+
+    if (!dataset) {
+      return res.status(404).json({ error: "Dataset not found" });
+    }
+
+    // Run Stage 2: Understanding (column classification, relationship detection)
+    const understandingResult = await runUnderstanding(datasetId);
+    if (understandingResult.error) {
+      return res.status(500).json({
+        error: understandingResult.error,
+        stage: "understanding",
+      });
+    }
+
+    // Run Stage 3: Embedding (embed business entities for semantic matching)
+    const embeddingResult = await runEmbedding(datasetId, { uploadsDir: UPLOAD_DIR });
+    if (embeddingResult.error) {
+      return res.status(500).json({
+        error: embeddingResult.error,
+        stage: "embedding",
+      });
+    }
+
+    // Update status to indicate processing is complete
+    await updateDatasetStatus(datasetId, "embedded");
+
+    res.json({
+      ok: true,
+      datasetId,
+      fileName: dataset.file_name,
+      stages: {
+        understanding: {
+          columnsClassified: understandingResult.classifications?.length ?? 0,
+          relationshipsDetected: understandingResult.relationships?.length ?? 0,
+        },
+        embedding: {
+          entitiesEmbedded: embeddingResult.embeddedCount ?? 0,
+        },
+      },
+      message: "Corrected dataset processed through Stages 2-3. Ready for Stage 4 (Context), Stage 6 (ATUM), and Stage 7 (TBM Export).",
+    });
+  } catch (err) {
+    console.error("Failed to process corrected dataset:", err);
+    res.status(500).json({
+      error: err instanceof Error ? err.message : "Failed to process corrected dataset",
     });
   }
 });

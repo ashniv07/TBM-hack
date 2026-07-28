@@ -11,3 +11,5 @@ export * from "./graphs/standardizationGraph";
 export * from "./standardization/applyCorrections";
 export * from "./atum/importTaxonomy";
 export * from "./atum/mapToAtum";
+export * from "./tbmExport";
+export * from "./assistant";

@@ -1062,3 +1062,319 @@ export async function reviewAtumMapping(input: {
   );
   return rows[0] ?? null;
 }
+
+// ---------- Stage 7: TBM Data Model Export ----------
+
+import {
+  TbmExport,
+  TbmExportType,
+  TbmExportStatus,
+  TbmExportFormat,
+  TbmCostCenter,
+  TbmApplication,
+  TbmVendor,
+  TbmCloudResource,
+  TbmCostAllocation,
+} from "./types";
+
+export async function createTbmExport(input: {
+  exportType: TbmExportType;
+  format: TbmExportFormat;
+  includeUnmapped?: boolean;
+  includeLowConfidence?: boolean;
+  confidenceThreshold?: number;
+  createdBy?: string;
+}): Promise<TbmExport> {
+  const { rows } = await getPool().query<TbmExport>(
+    `insert into tbm_exports (export_type, format, include_unmapped, include_low_confidence, confidence_threshold, created_by)
+     values ($1, $2, $3, $4, $5, $6) returning *`,
+    [
+      input.exportType,
+      input.format,
+      input.includeUnmapped ?? false,
+      input.includeLowConfidence ?? false,
+      input.confidenceThreshold ?? 0.7,
+      input.createdBy ?? null,
+    ]
+  );
+  return rows[0];
+}
+
+export async function updateTbmExportStatus(
+  id: string,
+  status: TbmExportStatus,
+  filePath?: string,
+  recordCount?: number,
+  errorMessage?: string
+): Promise<TbmExport | null> {
+  const { rows } = await getPool().query<TbmExport>(
+    `update tbm_exports set status = $2, file_path = coalesce($3, file_path),
+       record_count = coalesce($4, record_count), error_message = $5,
+       completed_at = case when $2 in ('completed', 'failed') then now() else null end
+     where id = $1 returning *`,
+    [id, status, filePath ?? null, recordCount ?? null, errorMessage ?? null]
+  );
+  return rows[0] ?? null;
+}
+
+export async function getTbmExport(id: string): Promise<TbmExport | null> {
+  const { rows } = await getPool().query<TbmExport>(`select * from tbm_exports where id = $1`, [id]);
+  return rows[0] ?? null;
+}
+
+export async function listTbmExports(): Promise<TbmExport[]> {
+  const { rows } = await getPool().query<TbmExport>(`select * from tbm_exports order by created_at desc`);
+  return rows;
+}
+
+// Build cost centers from knowledge graph
+export async function buildTbmCostCenters(exportId: string): Promise<TbmCostCenter[]> {
+  const { rows } = await getPool().query<TbmCostCenter>(
+    `insert into tbm_cost_centers (export_id, cost_center_code, cost_center_name, source_entity_id, confidence)
+     select $1, ce.canonical_name, ce.canonical_name, ce.id, ce.resolution_confidence
+     from context_entities ce
+     where ce.entity_type = 'cost_center'
+     returning *`,
+    [exportId]
+  );
+  return rows;
+}
+
+// Build applications from knowledge graph with ATUM classification
+export async function buildTbmApplications(exportId: string, confidenceThreshold: number): Promise<TbmApplication[]> {
+  const { rows } = await getPool().query<TbmApplication>(
+    `insert into tbm_applications (export_id, application_id, application_name, atum_tower, atum_sub_tower, atum_service_domain, atum_confidence, source_entity_id, atum_mapping_id, confidence)
+     select $1, ce.canonical_name, ce.canonical_name,
+            t.level_1, t.level_2, t.level_3, m.confidence,
+            ce.id, m.id, ce.resolution_confidence
+     from context_entities ce
+     left join context_entity_aliases cea on cea.context_entity_id = ce.id
+     left join atum_mappings m on m.dataset_id = cea.dataset_id and m.column_id = cea.column_id
+       and lower(m.source_value) = lower(cea.entity_value)
+       and m.status in ('approved', 'overridden')
+       and m.layer = 'solution'
+       and m.confidence >= $2
+     left join atum_taxonomy_items t on t.id = m.category_id
+     where ce.entity_type = 'application'
+     on conflict do nothing
+     returning *`,
+    [exportId, confidenceThreshold]
+  );
+  return rows;
+}
+
+// Build vendors from knowledge graph
+export async function buildTbmVendors(exportId: string, confidenceThreshold: number): Promise<TbmVendor[]> {
+  const { rows } = await getPool().query<TbmVendor>(
+    `insert into tbm_vendors (export_id, vendor_id, vendor_name, atum_cost_pool, atum_confidence, source_entity_id, confidence)
+     select $1, ce.canonical_name, ce.canonical_name,
+            t.level_1, m.confidence, ce.id, ce.resolution_confidence
+     from context_entities ce
+     left join context_entity_aliases cea on cea.context_entity_id = ce.id
+     left join atum_mappings m on m.dataset_id = cea.dataset_id and m.column_id = cea.column_id
+       and lower(m.source_value) = lower(cea.entity_value)
+       and m.status in ('approved', 'overridden')
+       and m.layer = 'cost_pool'
+       and m.confidence >= $2
+     left join atum_taxonomy_items t on t.id = m.category_id
+     where ce.entity_type = 'vendor'
+     on conflict do nothing
+     returning *`,
+    [exportId, confidenceThreshold]
+  );
+  return rows;
+}
+
+// Build cloud resources from knowledge graph with ATUM classification
+export async function buildTbmCloudResources(exportId: string, confidenceThreshold: number): Promise<TbmCloudResource[]> {
+  const { rows } = await getPool().query<TbmCloudResource>(
+    `insert into tbm_cloud_resources (export_id, resource_id, resource_name, cloud_provider, atum_tower, atum_sub_tower, atum_confidence, source_entity_id, atum_mapping_id, confidence)
+     select $1, ce.canonical_name, ce.canonical_name,
+            (select ce2.canonical_name from context_edges cedge
+             join context_entities ce2 on ce2.id = cedge.to_entity_id
+             where cedge.from_entity_id = ce.id and ce2.entity_type = 'cloud_provider' limit 1),
+            t.level_1, t.level_2, m.confidence, ce.id, m.id, ce.resolution_confidence
+     from context_entities ce
+     left join context_entity_aliases cea on cea.context_entity_id = ce.id
+     left join atum_mappings m on m.dataset_id = cea.dataset_id and m.column_id = cea.column_id
+       and lower(m.source_value) = lower(cea.entity_value)
+       and m.status in ('approved', 'overridden')
+       and m.layer = 'resource_tower'
+       and m.confidence >= $2
+     left join atum_taxonomy_items t on t.id = m.category_id
+     where ce.entity_type = 'cloud_resource'
+     on conflict do nothing
+     returning *`,
+    [exportId, confidenceThreshold]
+  );
+  return rows;
+}
+
+// Get TBM data model for an export
+export async function getTbmDataModel(exportId: string): Promise<{
+  costCenters: TbmCostCenter[];
+  applications: TbmApplication[];
+  vendors: TbmVendor[];
+  cloudResources: TbmCloudResource[];
+}> {
+  const [costCenters, applications, vendors, cloudResources] = await Promise.all([
+    getPool().query<TbmCostCenter>(`select * from tbm_cost_centers where export_id = $1`, [exportId]),
+    getPool().query<TbmApplication>(`select * from tbm_applications where export_id = $1`, [exportId]),
+    getPool().query<TbmVendor>(`select * from tbm_vendors where export_id = $1`, [exportId]),
+    getPool().query<TbmCloudResource>(`select * from tbm_cloud_resources where export_id = $1`, [exportId]),
+  ]);
+  return {
+    costCenters: costCenters.rows,
+    applications: applications.rows,
+    vendors: vendors.rows,
+    cloudResources: cloudResources.rows,
+  };
+}
+
+// Clear export data for re-running
+export async function clearTbmExportData(exportId: string): Promise<void> {
+  await Promise.all([
+    getPool().query(`delete from tbm_cost_centers where export_id = $1`, [exportId]),
+    getPool().query(`delete from tbm_applications where export_id = $1`, [exportId]),
+    getPool().query(`delete from tbm_vendors where export_id = $1`, [exportId]),
+    getPool().query(`delete from tbm_cloud_resources where export_id = $1`, [exportId]),
+    getPool().query(`delete from tbm_cost_allocations where export_id = $1`, [exportId]),
+  ]);
+}
+
+// Get full knowledge graph entities for export
+export async function getKnowledgeGraphForExport(): Promise<{
+  entities: ContextEntityRow[];
+  edges: ContextEdgeRow[];
+}> {
+  const [entities, edges] = await Promise.all([
+    getPool().query<ContextEntityRow>(`select * from context_entities order by entity_type, canonical_name`),
+    getPool().query<ContextEdgeRow>(`select * from context_edges`),
+  ]);
+  return { entities: entities.rows, edges: edges.rows };
+}
+
+// ---------- Stage 8: AI Assistant ----------
+
+import { AssistantSession, AssistantMessage, AssistantRole } from "./types";
+
+export async function createAssistantSession(title?: string, createdBy?: string): Promise<AssistantSession> {
+  const { rows } = await getPool().query<AssistantSession>(
+    `insert into assistant_sessions (title, created_by) values ($1, $2) returning *`,
+    [title ?? null, createdBy ?? null]
+  );
+  return rows[0];
+}
+
+export async function getAssistantSession(id: string): Promise<AssistantSession | null> {
+  const { rows } = await getPool().query<AssistantSession>(`select * from assistant_sessions where id = $1`, [id]);
+  return rows[0] ?? null;
+}
+
+export async function listAssistantSessions(): Promise<AssistantSession[]> {
+  const { rows } = await getPool().query<AssistantSession>(`select * from assistant_sessions order by updated_at desc limit 50`);
+  return rows;
+}
+
+export async function updateAssistantSessionTitle(id: string, title: string): Promise<AssistantSession | null> {
+  const { rows } = await getPool().query<AssistantSession>(
+    `update assistant_sessions set title = $2, updated_at = now() where id = $1 returning *`,
+    [id, title]
+  );
+  return rows[0] ?? null;
+}
+
+export async function addAssistantMessage(input: {
+  sessionId: string;
+  role: AssistantRole;
+  content: string;
+  metadata?: Record<string, unknown>;
+}): Promise<AssistantMessage> {
+  const { rows } = await getPool().query<AssistantMessage>(
+    `insert into assistant_messages (session_id, role, content, metadata) values ($1, $2, $3, $4) returning *`,
+    [input.sessionId, input.role, input.content, input.metadata ? JSON.stringify(input.metadata) : null]
+  );
+  // Update session's updated_at
+  await getPool().query(`update assistant_sessions set updated_at = now() where id = $1`, [input.sessionId]);
+  return rows[0];
+}
+
+export async function getAssistantMessages(sessionId: string): Promise<AssistantMessage[]> {
+  const { rows } = await getPool().query<AssistantMessage>(
+    `select * from assistant_messages where session_id = $1 order by created_at asc`,
+    [sessionId]
+  );
+  return rows;
+}
+
+// Get context for RAG - summary of knowledge graph, issues, mappings
+export async function getAssistantContext(): Promise<{
+  entityCount: number;
+  edgeCount: number;
+  datasetCount: number;
+  issueCount: number;
+  openIssueCount: number;
+  mappingCount: number;
+  approvedMappingCount: number;
+  averageReadiness: number;
+  entityTypes: Record<string, number>;
+  recentIssues: { title: string; severity: string; dataset: string }[];
+}> {
+  const [
+    { rows: [entityStats] },
+    { rows: [edgeStats] },
+    { rows: [datasetStats] },
+    { rows: [issueStats] },
+    { rows: [mappingStats] },
+    { rows: [readinessStats] },
+    { rows: entityTypes },
+    { rows: recentIssues },
+  ] = await Promise.all([
+    getPool().query(`select count(*) as count from context_entities`),
+    getPool().query(`select count(*) as count from context_edges`),
+    getPool().query(`select count(*) as count from datasets`),
+    getPool().query(`select count(*) as total, count(*) filter (where status = 'open') as open from quality_issues`),
+    getPool().query(`select count(*) as total, count(*) filter (where status in ('approved', 'overridden')) as approved from atum_mappings`),
+    getPool().query(`select avg(overall_score) as avg from readiness_scores`),
+    getPool().query(`select entity_type, count(*) as count from context_entities group by entity_type`),
+    getPool().query(`select qi.title, qi.severity, d.file_name as dataset from quality_issues qi join datasets d on d.id = qi.dataset_id order by qi.created_at desc limit 5`),
+  ]);
+
+  return {
+    entityCount: Number(entityStats.count),
+    edgeCount: Number(edgeStats.count),
+    datasetCount: Number(datasetStats.count),
+    issueCount: Number(issueStats.total),
+    openIssueCount: Number(issueStats.open),
+    mappingCount: Number(mappingStats.total),
+    approvedMappingCount: Number(mappingStats.approved),
+    averageReadiness: readinessStats.avg ? Number(Number(readinessStats.avg).toFixed(3)) : 0,
+    entityTypes: Object.fromEntries(entityTypes.map((r: any) => [r.entity_type, Number(r.count)])),
+    recentIssues: recentIssues.map((r: any) => ({ title: r.title, severity: r.severity, dataset: r.dataset })),
+  };
+}
+
+// Search entities by name for assistant queries
+export async function searchEntitiesByName(query: string, limit = 10): Promise<ContextEntityRow[]> {
+  const { rows } = await getPool().query<ContextEntityRow>(
+    `select * from context_entities where canonical_name ilike $1 order by resolution_confidence desc limit $2`,
+    [`%${query}%`, limit]
+  );
+  return rows;
+}
+
+// Get ATUM mapping explanation for an entity
+export async function getAtumMappingForEntity(entityName: string): Promise<AtumMappingView | null> {
+  const { rows } = await getPool().query<AtumMappingView>(
+    `select m.*, d.file_name as dataset_file_name, dc.column_name, dc.semantic_role,
+            t.path as category_path, t.level_1, t.level_2, t.level_3
+     from atum_mappings m
+     join datasets d on d.id = m.dataset_id
+     join dataset_columns dc on dc.id = m.column_id
+     left join atum_taxonomy_items t on t.id = m.category_id
+     where lower(m.source_value) = lower($1) or m.source_value ilike $2
+     order by m.confidence desc limit 1`,
+    [entityName, `%${entityName}%`]
+  );
+  return rows[0] ?? null;
+}

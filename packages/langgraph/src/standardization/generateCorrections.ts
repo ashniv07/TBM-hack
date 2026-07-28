@@ -57,7 +57,7 @@ export async function generateCorrectionsNode(state: StandardizationState): Prom
 
     // Skip issues that don't have sample values to correct
     if (!issue.sampleValues || issue.sampleValues.length === 0) {
-      // For duplicates and missing values, we can still propose actions
+      // For duplicates, we can still propose actions
       if (issue.issueType === "duplicate") {
         corrections.push({
           datasetId: issue.datasetId,
@@ -68,15 +68,32 @@ export async function generateCorrectionsNode(state: StandardizationState): Prom
           reasoning: "Duplicate rows should be reviewed and removed to ensure data integrity",
         });
       }
+      // For missing values without samples, suggest fill action
+      if (issue.issueType === "missing_value") {
+        corrections.push({
+          datasetId: issue.datasetId,
+          columnId: issue.columnId,
+          correctionType: "fill_missing",
+          affectedRows: issue.affectedRows,
+          confidence: 0.5,
+          reasoning: "Missing values should be filled with appropriate defaults or removed",
+        });
+      }
       continue;
     }
 
-    // Try AI-powered corrections first, then fall back to heuristics
-    if (hasOpenAI && (issue.issueType === "invalid_reference" || issue.issueType === "invalid_date")) {
+    // Try AI-powered corrections for all supported issue types
+    if (hasOpenAI) {
       const aiCorrections = await generateAICorrections(issue);
-      corrections.push(...aiCorrections);
+      if (aiCorrections.length > 0) {
+        corrections.push(...aiCorrections);
+      } else {
+        // AI didn't produce corrections, fall back to heuristics
+        const heuristicCorrections = generateHeuristicCorrections(issue);
+        corrections.push(...heuristicCorrections);
+      }
     } else {
-      // Heuristic corrections
+      // No OpenAI, use heuristic corrections
       const heuristicCorrections = generateHeuristicCorrections(issue);
       corrections.push(...heuristicCorrections);
     }
@@ -110,18 +127,21 @@ Respond with only the corrections in JSON format:
       const content = typeof response.content === "string" ? response.content : "";
 
       try {
-        const parsed = JSON.parse(content);
-        for (const c of parsed.corrections || []) {
-          if (c.corrected && c.corrected !== "UNKNOWN") {
-            corrections.push({
-              datasetId: issue.datasetId,
-              columnId: issue.columnId,
-              correctionType: "normalize_date",
-              originalValue: c.original,
-              correctedValue: c.corrected,
-              confidence: c.confidence ?? 0.8,
-              reasoning: `AI-suggested date normalization from "${c.original}" to ISO 8601 format`,
-            });
+        const jsonMatch = content.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]);
+          for (const c of parsed.corrections || []) {
+            if (c.corrected && c.corrected !== "UNKNOWN") {
+              corrections.push({
+                datasetId: issue.datasetId,
+                columnId: issue.columnId,
+                correctionType: "normalize_date",
+                originalValue: c.original,
+                correctedValue: c.corrected,
+                confidence: c.confidence ?? 0.8,
+                reasoning: `AI-suggested date normalization from "${c.original}" to ISO 8601 format`,
+              });
+            }
           }
         }
       } catch {
@@ -148,23 +168,110 @@ Respond in JSON format:
       const content = typeof response.content === "string" ? response.content : "";
 
       try {
-        const parsed = JSON.parse(content);
-        for (const c of parsed.corrections || []) {
-          if (c.suggestion) {
-            corrections.push({
-              datasetId: issue.datasetId,
-              columnId: issue.columnId,
-              correctionType: "fuzzy_match_entity",
-              originalValue: c.original,
-              correctedValue: c.suggestion,
-              confidence: c.confidence ?? 0.6,
-              reasoning: c.reasoning || "AI-suggested entity name correction",
-            });
+        const jsonMatch = content.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]);
+          for (const c of parsed.corrections || []) {
+            if (c.suggestion) {
+              corrections.push({
+                datasetId: issue.datasetId,
+                columnId: issue.columnId,
+                correctionType: "fuzzy_match_entity",
+                originalValue: c.original,
+                correctedValue: c.suggestion,
+                confidence: c.confidence ?? 0.6,
+                reasoning: c.reasoning || "AI-suggested entity name correction",
+              });
+            }
           }
         }
       } catch {
         // Failed to parse AI response, fall back to heuristics
         return generateHeuristicCorrections(issue);
+      }
+    } else if (issue.issueType === "invalid_currency") {
+      const prompt = `You are a data quality assistant. For each of the following currency values, provide the correct ISO 4217 currency code (e.g., USD, EUR, GBP).
+If you cannot determine the currency, respond with "UNKNOWN".
+
+Values to correct:
+${sampleValues.map((v, i) => `${i + 1}. "${v}"`).join("\n")}
+
+Respond in JSON format:
+{"corrections": [{"original": "value", "code": "ISO 4217 code or UNKNOWN", "confidence": 0.0-1.0}]}`;
+
+      const response = await llm.invoke(prompt);
+      const content = typeof response.content === "string" ? response.content : "";
+
+      try {
+        const jsonMatch = content.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]);
+          for (const c of parsed.corrections || []) {
+            if (c.code && c.code !== "UNKNOWN") {
+              corrections.push({
+                datasetId: issue.datasetId,
+                columnId: issue.columnId,
+                correctionType: "normalize_currency",
+                originalValue: c.original,
+                correctedValue: c.code.toUpperCase(),
+                confidence: c.confidence ?? 0.85,
+                reasoning: `AI-suggested currency normalization to ISO 4217 code`,
+              });
+            }
+          }
+        }
+      } catch {
+        return generateHeuristicCorrections(issue);
+      }
+    } else if (issue.issueType === "outlier") {
+      // For outliers, AI can suggest whether to cap, remove, or keep with flag
+      const prompt = `You are a data quality assistant analyzing numeric outliers. The following values are statistical outliers (>3 standard deviations from mean).
+
+Issue: ${issue.title}
+Description: ${issue.description}
+Sample outlier values:
+${sampleValues.map((v, i) => `${i + 1}. ${v}`).join("\n")}
+
+For each value, suggest an action:
+- "cap" - Replace with a reasonable boundary value
+- "flag" - Keep but flag for review
+- "remove" - Likely data entry error, remove
+
+Respond in JSON format:
+{"corrections": [{"original": "value", "action": "cap|flag|remove", "suggestedValue": "capped value if action is cap, null otherwise", "confidence": 0.0-1.0, "reasoning": "brief explanation"}]}`;
+
+      const response = await llm.invoke(prompt);
+      const content = typeof response.content === "string" ? response.content : "";
+
+      try {
+        const jsonMatch = content.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]);
+          for (const c of parsed.corrections || []) {
+            if (c.action === "cap" && c.suggestedValue) {
+              corrections.push({
+                datasetId: issue.datasetId,
+                columnId: issue.columnId,
+                correctionType: "normalize_outlier",
+                originalValue: String(c.original),
+                correctedValue: String(c.suggestedValue),
+                confidence: c.confidence ?? 0.6,
+                reasoning: c.reasoning || "AI-suggested outlier capping",
+              });
+            } else if (c.action === "remove") {
+              corrections.push({
+                datasetId: issue.datasetId,
+                columnId: issue.columnId,
+                correctionType: "remove_outlier",
+                originalValue: String(c.original),
+                confidence: c.confidence ?? 0.5,
+                reasoning: c.reasoning || "AI-suggested outlier removal",
+              });
+            }
+          }
+        }
+      } catch {
+        // No heuristic fallback for outliers - requires human review
       }
     }
   } catch {

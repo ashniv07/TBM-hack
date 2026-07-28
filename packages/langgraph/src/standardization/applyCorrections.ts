@@ -6,13 +6,21 @@ import {
   getDatasetColumns,
   getCorrections,
   markCorrectionApplied,
+  createDataset,
+  updateDatasetStatus,
+  setDatasetSourceType,
   Correction,
+  Dataset,
 } from "@tbm/db";
 
 export interface ApplyCorrectionResult {
   originalFile: string;
   correctedFile: string;
   correctionsApplied: number;
+  /** The new dataset created from the corrected file - use this for subsequent stages */
+  correctedDataset?: Dataset;
+  /** Original dataset ID that was corrected */
+  originalDatasetId: string;
   changes: {
     correctionId: string;
     columnName: string;
@@ -179,10 +187,33 @@ export async function applyCorrectionsToDataset(
     await markCorrectionApplied(correctionId);
   }
 
+  // Register the corrected file as a new dataset for subsequent stages
+  // This allows Stage 6 (ATUM), Stage 7 (TBM Export) to use the cleaned data
+  const correctedDataset = await createDataset({
+    fileName: correctedFileName,
+    storagePath: correctedPath,
+    sheetName: dataset.sheet_name ?? undefined,
+    uploadedBy: "system:correction",
+  });
+
+  // Copy source type from original dataset
+  if (dataset.source_type) {
+    await setDatasetSourceType(
+      correctedDataset.id,
+      dataset.source_type,
+      dataset.source_type_confidence ?? 1.0
+    );
+  }
+
+  // Mark as ready for processing (skip profiling since it's derived from profiled data)
+  await updateDatasetStatus(correctedDataset.id, "profiled");
+
   return {
     originalFile: sourcePath,
     correctedFile: correctedPath,
     correctionsApplied: appliedCorrectionIds.length,
+    correctedDataset,
+    originalDatasetId: datasetId,
     changes,
   };
 }
