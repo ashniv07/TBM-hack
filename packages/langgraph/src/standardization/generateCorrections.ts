@@ -10,18 +10,6 @@ const ISSUE_TO_CORRECTION: Record<string, string> = {
   duplicate: "remove_duplicate",
 };
 
-// Common date format normalizations
-const DATE_NORMALIZATIONS: Record<string, string> = {
-  // MM/DD/YYYY -> YYYY-MM-DD
-  "01/15/2024": "2024-01-15",
-  "1/15/2024": "2024-01-15",
-  // DD-MM-YYYY -> YYYY-MM-DD
-  "15-01-2024": "2024-01-15",
-  // Month names
-  "January 15, 2024": "2024-01-15",
-  "Jan 15 2024": "2024-01-15",
-};
-
 // Currency code normalizations
 const CURRENCY_NORMALIZATIONS: Record<string, string> = {
   "$": "USD",

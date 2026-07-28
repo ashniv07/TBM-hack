@@ -645,3 +645,16 @@ code {
   margin: 0.5rem 0 0 1rem;
   padding: 0;
 }
+
+/* ---------- Stage 7: TBM Data Model ---------- */
+.tbm-actions, .tbm-tabs { display: flex; flex-wrap: wrap; gap: .75rem; align-items: center; margin: 1rem 0; }
+.tbm-tabs select { background: #1a1d24; color: #e6e8eb; border: 1px solid #3a3f4b; border-radius: 4px; padding: .4rem; }
+.tbm-tabs button.secondary { background: #262a33; }
+.tbm-download {
+  background: #2f6f4f; color: #e6e8eb; border-radius: 5px; padding: .45rem .8rem;
+  text-decoration: none; font-size: .85rem;
+}
+.tbm-download.disabled { background: #262a33; color: #6b7280; pointer-events: none; }
+.tbm-stamp { color: #9aa2ad; font-size: .8rem; }
+.tbm-warnings { margin: .5rem 0 1rem; padding-left: 1.2rem; color: #d69b6f; font-size: .85rem; }
+.tbm-warnings li { margin: .3rem 0; }

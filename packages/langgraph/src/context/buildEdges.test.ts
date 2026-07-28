@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { ENTITY_TYPE_RELATIONSHIP_LABELS, deriveEdgeLabel, evaluateStructuralKeyCandidate, nameSimilarity } from "./buildEdges";
+import { ENTITY_TYPE_RELATIONSHIP_LABELS, deriveEdgeLabel, evaluateStructuralKeyCandidate } from "./buildEdges";
+import { nameSimilarity } from "../shared/nameSimilarity";
 import { DatasetColumn } from "@tbm/db";
 
 function column(overrides: Partial<DatasetColumn> = {}): DatasetColumn {

@@ -7,6 +7,7 @@ import { SemanticMatches } from "./components/SemanticMatches";
 import { ContextGraph } from "./components/ContextGraph";
 import { DataQualityDashboard } from "./components/DataQualityDashboard";
 import { AtumMappingDashboard } from "./components/AtumMappingDashboard";
+import { TbmModelPanel } from "./components/TbmModelPanel";
 
 export default function App() {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
@@ -27,7 +28,7 @@ export default function App() {
     <div className="app">
       <header>
         <h1>TBM Data Trust & Intelligence Platform</h1>
-        <p className="subtitle">Stages 1-6 — Ingestion · Understanding · Embeddings · Knowledge Graph · Data Quality · ATUM Mapping</p>
+        <p className="subtitle">Stages 1-7 — Ingestion · Understanding · Embeddings · Knowledge Graph · Data Quality · ATUM Mapping · TBM Data Model</p>
       </header>
 
       <main>
@@ -77,6 +78,15 @@ export default function App() {
           <h2>ATUM Mapping</h2>
           <p className="section-hint">Explainable mapping to the official TBM Taxonomy v5.0.1 with confidence scoring and consultant review.</p>
           <AtumMappingDashboard />
+        </section>
+
+        <section>
+          <h2>TBM Data Model</h2>
+          <p className="section-hint">
+            The validated, standardized and ATUM-classified data assembled into an Apptio-ready model (Stage 7) —
+            business objects, their preserved relationships, and the source lineage behind each one.
+          </p>
+          <TbmModelPanel />
         </section>
       </main>
     </div>

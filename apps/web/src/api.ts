@@ -287,16 +287,6 @@ export async function runStandardization(): Promise<StandardizationRunResult> {
   return res.json();
 }
 
-export async function fetchCanonicalSchemas(sourceType?: string): Promise<CanonicalSchema[]> {
-  const url = sourceType
-    ? `${API_BASE}/standardization/schemas?sourceType=${encodeURIComponent(sourceType)}`
-    : `${API_BASE}/standardization/schemas`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Failed to fetch schemas: ${res.statusText}`);
-  const data = await res.json();
-  return data.schemas;
-}
-
 export async function fetchQualityIssues(filters?: {
   datasetId?: string;
   status?: string;
@@ -365,25 +355,11 @@ export async function bulkApproveCorrections(ids: string[]): Promise<number> {
   return data.approved;
 }
 
-export async function applyCorrection(id: string): Promise<Correction> {
-  const res = await fetch(`${API_BASE}/standardization/corrections/${id}/apply`, { method: "POST" });
-  if (!res.ok) throw new Error(`Failed to apply correction: ${res.statusText}`);
-  const data = await res.json();
-  return data.correction;
-}
-
 export async function fetchReadinessScores(): Promise<ReadinessScore[]> {
   const res = await fetch(`${API_BASE}/standardization/readiness`);
   if (!res.ok) throw new Error(`Failed to fetch readiness scores: ${res.statusText}`);
   const data = await res.json();
   return data.scores;
-}
-
-export async function fetchReadinessScore(datasetId: string): Promise<ReadinessScore> {
-  const res = await fetch(`${API_BASE}/standardization/readiness/${datasetId}`);
-  if (!res.ok) throw new Error(`Failed to fetch readiness score: ${res.statusText}`);
-  const data = await res.json();
-  return data.score;
 }
 
 export async function fetchDataQualityReport(): Promise<DataQualityReport> {
@@ -511,3 +487,58 @@ export async function reviewAtumMapping(id: string, action: "approve" | "reject"
   if (!res.ok) throw new Error("Failed to review ATUM mapping");
   return res.json();
 }
+
+// ---------- Stage 7: TBM Data Model Generation ----------
+
+export interface TbmObject {
+  id: string;
+  name: string;
+  objectType: string;
+  resolutionConfidence: number;
+  aliasCount: number;
+  sourceDatasets: string[];
+  costPool: string | null;
+  resourceTower: string | null;
+  solution: string | null;
+  atumPaths: Partial<Record<AtumLayer, string>>;
+  atumConfidence: number | null;
+}
+
+export interface TbmRelationship {
+  fromId: string; fromName: string; fromType: string;
+  relationship: string;
+  toId: string; toName: string; toType: string;
+  confidence: number;
+  evidenceDataset: string | null;
+}
+
+export interface TbmSourceDataset {
+  datasetId: string; fileName: string; sourceType: string | null; rowCount: number | null;
+  businessPurpose: string | null;
+  readinessScore: number | null; issueCount: number | null; criticalIssueCount: number | null;
+  tbmReady: boolean;
+}
+
+export interface TbmDataModel {
+  generatedAt: string;
+  taxonomyVersion: string;
+  summary: {
+    objects: number; classifiedObjects: number; classificationCoverage: number;
+    relationships: number; sourceDatasets: number; tbmReadyDatasets: number;
+    averageReadiness: number; averageMappingConfidence: number;
+    objectsByType: Record<string, number>; objectsByTower: Record<string, number>;
+  };
+  objects: TbmObject[];
+  relationships: TbmRelationship[];
+  sourceDatasets: TbmSourceDataset[];
+  warnings: string[];
+}
+
+export async function fetchTbmModel(): Promise<TbmDataModel> {
+  const res = await fetch(`${API_BASE}/tbm/model`);
+  if (!res.ok) throw new Error((await res.json()).error ?? "Failed to build TBM data model");
+  return res.json();
+}
+
+/** The workbook is a plain GET, so the browser can download it directly. */
+export const TBM_EXPORT_URL = `${API_BASE}/tbm/export.xlsx`;

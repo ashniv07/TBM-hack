@@ -160,8 +160,36 @@ review, and approve / reject / override each update the knowledge graph.
 - Supports approve, reject, and manual override actions with reviewer timestamps
 - Stores alternatives, evidence, method, confidence, and taxonomy version for every result
 
-### Stage 7 — TBM Data Model Generation
+### Stage 7 — TBM Data Model Generation *(implemented)*
 The validated and standardized datasets are transformed into an Apptio-ready TBM data model. Relationships between cost centers, business units, applications, cloud resources, vendors, and financial transactions are preserved, enabling accurate financial modeling within IBM Apptio.
+
+**Derived, never stored.** There is no Stage 7 table and no "generate" step to
+re-run: the model is assembled on request from what Stages 4-6 already
+persisted (context graph, approved/overridden ATUM mappings, readiness
+scores), so the export can never disagree with the graph it describes.
+
+**What the model contains:**
+- **Business objects** — every Stage 4 canonical entity, minus the platform's
+  own modelling nodes (`dataset`, `attribute_group`, `atum_category`). Each
+  object carries its ATUM Cost Pool / Resource Tower / Technology Solution
+  (one classification per layer, highest confidence wins), mapping confidence,
+  resolution confidence, and the source datasets that evidenced it.
+- **Relationships** — dataset↔dataset `foreign_key` lineage plus labeled
+  entity↔entity business links (`USES_VENDOR`, `HOSTED_BY`, ...). Internal
+  `contains_reference` and `maps_to_atum` edges are dropped: the first is
+  already expressed as each object's source-dataset list, the second as its
+  ATUM columns.
+- **Source datasets** — file, source type, row count, readiness score, issue
+  counts, and a `tbmReady` flag (readiness ≥ 0.7).
+- **Warnings** — unallocated objects, datasets below the readiness threshold,
+  and a missing graph or missing relationships, so a consultant sees the
+  blockers before loading anything into Apptio.
+
+**Export:** `GET /api/tbm/export.xlsx` produces an Apptio-shaped workbook —
+`Model Summary`, one object table per entity type (`Vendors`,
+`Applications`, `Cost Centers`, ...), `Relationships`, and `Source Datasets`.
+The UI's **TBM Data Model** panel previews the same model and links the
+download.
 
 ### Stage 8 — AI Assistant
 An AI assistant enables consultants and business users to interact with the platform using natural language.
@@ -202,6 +230,15 @@ npm run db:migrate      # applies packages/db/migrations
 
 ### Starting from a clean database
 
+One command does the whole thing — build, drop, re-migrate, then load every
+sample workbook through Stages 1-6 and map all three ATUM layers:
+
+```bash
+npm run db:refresh      # DESTRUCTIVE: wipes the database and reloads it end to end
+```
+
+The individual steps, if you need them separately:
+
 ```bash
 npm run db:reset        # DESTRUCTIVE: drops every table in the public schema,
                         # then re-applies all migrations from scratch.
@@ -209,12 +246,17 @@ npm run db:reset        # DESTRUCTIVE: drops every table in the public schema,
 npm run db:seed         # copies all 19 sample workbooks from
                         # packages/langgraph/data into the uploads dir, then
                         # runs Stages 1-3 per workbook, then Stages 4, 5 and 6.
-                        # Add --layers=resource_tower,cost_pool,solution to map
-                        # more than the default resource_tower layer.
+                        # Defaults to the resource_tower layer only; add
+                        # -- --layers=cost_pool,resource_tower,solution for all three.
 ```
 
-`db:seed` takes a while — it re-embeds every distinct business value through
-the OpenAI embeddings API, and one sample workbook is ~52MB.
+`db:refresh` maps all three ATUM layers because a partial reload is what
+produces a near-empty Stage 7 export — with only `resource_tower` mapped,
+every object's Cost Pool and Solution column comes out blank.
+
+Both take a while — every distinct business value is re-embedded through the
+OpenAI embeddings API, and one sample workbook is ~52MB. Expect `db:refresh`
+to run for several minutes.
 
 ### Run
 
@@ -293,12 +335,6 @@ After uploading datasets and running Stages 1-4:
 - `POST /api/atum/sync-graph` — Re-materialise approved mappings as graph edges
 - `GET /api/atum/report` — Coverage, average confidence, counts by status and tower
 
-**Stage 6 — ATUM Mapping:**
-- `POST /api/atum/taxonomy/import` — Import and embed the bundled TBM Taxonomy v5.0.1 workbook
-- `GET /api/atum/taxonomy` — List official categories, optionally filtered by layer
-- `POST /api/atum/run` — Generate mappings for a taxonomy layer
-- `GET /api/atum/mappings` — List and filter mapping results
-- `POST /api/atum/mappings/:id/approve` — Approve a suggestion
-- `POST /api/atum/mappings/:id/reject` — Reject a suggestion
-- `POST /api/atum/mappings/:id/override` — Select a different official category
-- `GET /api/atum/report` — Coverage, confidence, status, and tower summary
+**Stage 7 — TBM Data Model:**
+- `GET /api/tbm/model` — The full Apptio-ready model as JSON (objects, relationships, source datasets, summary, warnings)
+- `GET /api/tbm/export.xlsx` — The same model as a multi-sheet Apptio-shaped workbook

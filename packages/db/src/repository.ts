@@ -22,6 +22,7 @@ import {
   ReadinessScore,
   ReadinessScoreView,
   SemanticMatch,
+  AtumEntityClassification,
   AtumLayer,
   AtumMapping,
   AtumMappingStatus,
@@ -608,14 +609,6 @@ export async function updateQualityIssueStatus(id: string, status: IssueStatus):
   return rows[0] ?? null;
 }
 
-export async function clearQualityIssuesForDataset(datasetId: string): Promise<number> {
-  const result = await getPool().query(
-    `delete from quality_issues where dataset_id = $1`,
-    [datasetId]
-  );
-  return result.rowCount ?? 0;
-}
-
 export async function clearAllQualityIssues(): Promise<number> {
   const result = await getPool().query(`delete from quality_issues`);
   return result.rowCount ?? 0;
@@ -720,14 +713,6 @@ export async function markCorrectionApplied(id: string): Promise<Correction | nu
     [id]
   );
   return rows[0] ?? null;
-}
-
-export async function clearCorrectionsForDataset(datasetId: string): Promise<number> {
-  const result = await getPool().query(
-    `delete from corrections where dataset_id = $1`,
-    [datasetId]
-  );
-  return result.rowCount ?? 0;
 }
 
 export async function clearAllCorrections(): Promise<number> {
@@ -979,14 +964,21 @@ export async function getContextEntityAliasMap(): Promise<
 // them. The join is on (dataset_id, column_id, entity_value) — the same grain
 // Stage 3 embedded — so a mapping anchored on a non-embeddable column simply
 // does not appear here (see extractContext.ts displayPriority).
+//
+// syncAtumEdgesToGraph() below only reads mapping_id/context_entity_id/
+// category_path/confidence; the taxonomy-level and status columns are here for
+// Stage 7, which needs the full classification per entity, not just the edge.
 export async function getApprovedAtumMappingsForGraph(filters?: {
   layer?: AtumLayer;
   mappingId?: string;
-}): Promise<{ mapping_id: string; context_entity_id: string; category_path: string; confidence: number }[]> {
+}): Promise<AtumEntityClassification[]> {
   const params: unknown[] = [];
-  let query = `select m.id as mapping_id, cea.context_entity_id, t.path as category_path, m.confidence
+  let query = `select m.id as mapping_id, cea.context_entity_id, t.path as category_path, m.confidence,
+                      m.layer, m.status, m.method, m.source_value,
+                      t.level_1, t.level_2, t.level_3, d.file_name as dataset_file_name
                from atum_mappings m
                join atum_taxonomy_items t on t.id = m.category_id
+               join datasets d on d.id = m.dataset_id
                join context_entity_aliases cea
                  on cea.dataset_id = m.dataset_id
                 and cea.column_id = m.column_id

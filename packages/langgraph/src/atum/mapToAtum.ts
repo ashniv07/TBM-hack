@@ -53,15 +53,8 @@ export function ruleBoost(context: string, category: Pick<AtumTaxonomyItem, "pat
   return { score: 0 };
 }
 
-function relevantForLayer(role: string | null, layer: AtumLayer): boolean {
-  if (layer === "resource_tower") return !["business_unit", "department", "cost_center"].includes(role ?? "");
-  if (layer === "solution") return ["application", "service", "project"].includes(role ?? "");
-  return ["vendor", "service", "cloud_provider"].includes(role ?? "");
-}
-
 async function llmChoose(
   value: string,
-  role: string | null,
   candidates: (AtumTaxonomyItem & { distance: number })[]
 ): Promise<{ categoryId: string; confidence: number; reasoning: string } | null> {
   if (!process.env.OPENAI_API_KEY || candidates.length === 0) return null;
@@ -71,7 +64,6 @@ async function llmChoose(
     const choices = candidates.map((c, i) => `${i + 1}. ${c.path}: ${c.search_text.slice(0, 500)}`).join("\n");
     const response = await model.invoke(`Map the enterprise value to exactly one supplied TBM Taxonomy category.
 Value: ${JSON.stringify(value)}
-Semantic role: ${role ?? "unknown"}
 Allowed categories:\n${choices}
 Do not invent a category. Return JSON only: {"choice":1,"confidence":0.0,"reasoning":"one sentence"}`);
     const content = typeof response.content === "string" ? response.content : "";
@@ -119,7 +111,7 @@ export async function runAtumMapping(options?: { layer?: AtumLayer; useLlm?: boo
       return { category, semanticSimilarity, lexical, rule, score };
     }).sort((a, b) => b.score - a.score);
 
-    const ai = options?.useLlm === true ? await llmChoose(input.contextText, "contextual_record", ranked.slice(0, 5).map((r) => r.category)) : null;
+    const ai = options?.useLlm === true ? await llmChoose(input.contextText, ranked.slice(0, 5).map((r) => r.category)) : null;
     let best = ranked[0];
     if (ai) best = ranked.find((r) => r.category.id === ai.categoryId) ?? best;
 
