@@ -14,5 +14,8 @@
     "db:seed": "node --max-old-space-size=8192 apps/api/dist/seed.js",
     "db:refresh": "npm run build && npm run db:reset && npm run db:seed -- --layers=cost_pool,resource_tower",
     "build": "npm run build -w packages/db && npm run build -w packages/langgraph && npm run build -w apps/api"
+  },
+  "dependencies": {
+    "xlsx": "^0.18.5"
   }
 }

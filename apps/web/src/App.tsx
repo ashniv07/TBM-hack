@@ -36,7 +36,7 @@ export default function App() {
   useEffect(() => {
     const phaseDesc: Record<PipelinePhase, string> = {
       import:        "Import Data — uploading and cataloging datasets",
-      relationships: "Relationships & Knowledge Graph — enterprise context model",
+      relationships: "Template Mapping — source columns matched to the Apptio master template, plus unmatched-column gaps",
       quality:       "Data Quality & Standardization — issues, corrections, readiness",
       atum:          "ATUM Mapping — TBM taxonomy classification review",
       export:        "TBM Export — Apptio-ready data model export",

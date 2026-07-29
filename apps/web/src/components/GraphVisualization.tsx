@@ -31,6 +31,9 @@ const TYPE_COLORS: Record<string, string> = {
   project: "#b3e07f",
   atum_category: "#f2c14e",
   attribute_group: "#9aa2ad",
+  // Template-mapping view (source file's columns -> Apptio master template).
+  template_column: "#c9a4f0",
+  unmatched_column: "#e08f7f",
 };
 
 const TYPE_LABELS: Record<string, string> = {
@@ -47,6 +50,8 @@ const TYPE_LABELS: Record<string, string> = {
   project: "project",
   atum_category: "ATUM category",
   attribute_group: "attribute (column)",
+  template_column: "master template column",
+  unmatched_column: "unmatched source column",
 };
 
 const LOW_CONFIDENCE_THRESHOLD = 0.7;
@@ -69,6 +74,10 @@ const EDGE_STRENGTH: Record<string, number> = {
   contains_reference: 1.3,
   co_occurs_with: 1,
   maps_to_atum: 1.4,
+  // Template-mapping view: keeps a dataset's own columns pulled in close
+  // around it, the same role contains_reference plays for the global graph.
+  has_column: 1.8,
+  template_mapped: 1.6,
 };
 
 const EDGE_COLOR: Record<string, string> = {
@@ -76,6 +85,8 @@ const EDGE_COLOR: Record<string, string> = {
   co_occurs_with: "#7fb0f5",
   contains_reference: "#4a4f5c",
   maps_to_atum: "#c084fc",
+  has_column: "#3a3f4b",
+  template_mapped: "#4ecdc4",
 };
 
 interface WeightedEdge {
