@@ -76,7 +76,8 @@ export function AtumPhase() {
           <button className="btn btn-secondary btn-sm" disabled={busy} onClick={() => exec(importAtumTaxonomy, "Taxonomy imported.")}>Import Taxonomy</button>
           <button className="btn btn-primary   btn-sm" disabled={busy}
             onClick={() => exec(async () => {
-              const ALL_LAYERS: AtumLayer[] = ["resource_tower", "cost_pool", "solution"];
+              // Two layers only — Technology Solutions is not standardisable across orgs.
+              const ALL_LAYERS: AtumLayer[] = ["resource_tower", "cost_pool"];
               let totalMapped = 0, totalCandidates = 0;
               for (const l of ALL_LAYERS) {
                 const { stats } = await runAtumMapping(l, useLlm);
@@ -90,7 +91,8 @@ export function AtumPhase() {
           </button>
           <button className="btn btn-secondary btn-sm" disabled={busy}
             onClick={() => exec(async () => {
-              const ALL_LAYERS: AtumLayer[] = ["resource_tower", "cost_pool", "solution"];
+              // Two layers only — Technology Solutions is not standardisable across orgs.
+              const ALL_LAYERS: AtumLayer[] = ["resource_tower", "cost_pool"];
               let totalEdges = 0, totalCategories = 0;
               for (const l of ALL_LAYERS) {
                 const r = await syncAtumGraph(l);
@@ -107,7 +109,7 @@ export function AtumPhase() {
 
       {/* Layer tabs + filters */}
       <div className="dq-tabs" style={{ gap: 0 }}>
-        {([["resource_tower", "Resource Towers"], ["cost_pool", "Cost Pools"], ["solution", "Technology Solutions"]] as [AtumLayer, string][]).map(([l, label]) => (
+        {([["resource_tower", "Resource Towers"], ["cost_pool", "Cost Pools"]] as [AtumLayer, string][]).map(([l, label]) => (
           <button key={l} className={`dq-tab ${layer === l ? "active" : ""}`} onClick={() => changeLayer(l)}>{label}</button>
         ))}
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8, paddingRight: 4 }}>

@@ -23,7 +23,7 @@ const CONCURRENCY = 3;
 
 function parseLayers(): AtumLayer[] {
   const arg = process.argv.find((a) => a.startsWith("--layers="));
-  const valid: AtumLayer[] = ["cost_pool", "resource_tower", "solution"];
+  const valid: AtumLayer[] = ["cost_pool", "resource_tower"];
   if (!arg) return ["resource_tower"];
   const requested = arg.slice("--layers=".length).split(",").map((s) => s.trim());
   const bad = requested.filter((r) => !valid.includes(r as AtumLayer));

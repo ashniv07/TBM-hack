@@ -32,6 +32,33 @@ export interface ContextualMappingInput {
 }
 
 const MAX_CONTEXTS_PER_DATASET = 150;
+
+// Per the client: only two ATUM layers are standardisable, and each is fed by
+// specific files. Technology Solutions is deliberately absent — it varies by
+// organisation and cannot be automated.
+//
+//   Cost Pool      <- Chart of Accounts (Account -> Cost Pool / Cost Sub Pool)
+//   Resource Tower <- Labor, Fixed Assets (depreciation), Vendors (by vendor
+//                     function), and the department / cost-centre hierarchy
+//
+// Without this gate every dataset was mapped, which is how applications ended
+// up classified as Resource Tower "Storage" — an application consumes a tower,
+// it is not one. Matched against dataset.source_type.
+const LAYER_SOURCE_TYPES: Record<AtumLayer, RegExp[]> = {
+  cost_pool: [/^chart of accounts$/i],
+  resource_tower: [
+    /^labor master$/i,
+    /^fixed asset register$/i,
+    /^vendor master$/i,
+    /cost cent(er|re) master|department hierarchy/i, // not yet supplied by the client
+  ],
+  solution: [],
+};
+
+export function isLayerSource(sourceType: string | null, layer: AtumLayer): boolean {
+  if (!sourceType) return false;
+  return LAYER_SOURCE_TYPES[layer].some((pattern) => pattern.test(sourceType.trim()));
+}
 const COMMON_COLUMN_HINT = /(description|product|service|application|app|vendor|supplier|manufacturer|account|resource|asset|device|platform|technology|category|type|project)/i;
 
 // Anchor preference among embeddable roles. MUST stay a permutation of
@@ -115,6 +142,9 @@ export async function extractContextualMappingInputs(options: {
   }
 
   for (const dataset of datasets) {
+    // Skip datasets this layer is not fed by, rather than mapping everything
+    // and relying on a confidence threshold to discard the nonsense.
+    if (!isLayerSource(dataset.source_type, options.layer)) continue;
     const allColumns = await getDatasetColumns(dataset.id);
     const columns = allColumns.filter((column) => isUsefulColumn(column, options.layer));
     if (columns.length === 0) continue;

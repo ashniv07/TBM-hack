@@ -12,7 +12,7 @@
     "db:migrate": "npm run migrate -w packages/db",
     "db:reset": "npm run build -w packages/db && npm run reset -w packages/db && npm run migrate -w packages/db",
     "db:seed": "node --max-old-space-size=8192 apps/api/dist/seed.js",
-    "db:refresh": "npm run build && npm run db:reset && npm run db:seed -- --layers=cost_pool,resource_tower,solution",
+    "db:refresh": "npm run build && npm run db:reset && npm run db:seed -- --layers=cost_pool,resource_tower",
     "build": "npm run build -w packages/db && npm run build -w packages/langgraph && npm run build -w apps/api"
   }
 }

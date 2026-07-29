@@ -17,7 +17,9 @@ export const atumRouter = Router();
 const DEFAULT_TAXONOMY_FILE = path.resolve(
   __dirname, "..", "..", "..", "..", "packages", "langgraph", "data", "TBM-Taxonomy-v5.0.1-Data-Table.xlsx"
 );
-const LAYERS = new Set(["cost_pool", "resource_tower", "solution"]);
+// Technology Solutions is intentionally unsupported: the client confirmed it
+// varies per organisation and cannot be standardised.
+const LAYERS = new Set(["cost_pool", "resource_tower"]);
 
 atumRouter.post("/taxonomy/import", wrap(async (_req, res) => {
   res.json({ ok: true, ...(await importAtumTaxonomy(DEFAULT_TAXONOMY_FILE)) });
