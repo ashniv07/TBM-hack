@@ -5,6 +5,7 @@ import {
   fetchDatasetDetail, fetchRelationships,
   rerunUnderstanding, rerunEmbedding,
 } from "../../api";
+import { TemplateCoveragePanel } from "./TemplateCoveragePanel";
 
 interface Props {
   datasets: Dataset[];
@@ -74,6 +75,7 @@ export function ImportPhase({ datasets, onDatasetsChanged }: Props) {
 
   return (
     <div className="phase-panel">
+      <TemplateCoveragePanel />
       {/* ── Left: Upload + Summary ── */}
       <div className="phase-left">
         <div className="phase-header">

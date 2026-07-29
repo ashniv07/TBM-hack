@@ -72,7 +72,7 @@ async function seed() {
         const stepStart = Date.now();
         const destination = path.join(UPLOAD_DIR, `${Date.now()}-${Math.round(Math.random() * 1e9)}-${fileName}`);
         try {
-          fs.copyFileSync(path.join(DATA_DIR, fileName), destination);
+          fs.copyFileSync(path.join(SOURCE_DIR, fileName), destination);
           const result = await runIngestion({ filePath: destination, fileName, uploadedBy: "seed" });
           if (result.error || !result.datasetId) {
             failures.push({ fileName, stage: "ingestion", error: result.error ?? "no datasetId" });

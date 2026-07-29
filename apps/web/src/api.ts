@@ -732,3 +732,61 @@ export async function fetchTbmModel(): Promise<TbmDataModel> {
 
 /** The workbook is a plain GET, so the browser can download it directly. */
 export const TBM_EXPORT_URL = `${API_BASE}/tbm/export.xlsx`;
+
+// ---------- Source-to-template column mapping ----------
+
+export interface ColumnMappingRow {
+  id: string;
+  dataset_id: string;
+  source_column: string;
+  /** null = the source supplied a column the template has no place for. */
+  template_column: string | null;
+  confidence: number;
+  method: string;
+  is_override: boolean;
+}
+
+export interface DatasetCoverage {
+  dataset_id: string;
+  file_name: string;
+  master_type: string | null;
+  template_coverage: number | null;
+  template_expected_count: number | null;
+  template_matched_count: number | null;
+}
+
+export interface CoverageDetail {
+  mappings: ColumnMappingRow[];
+  missingColumns: string[];
+  unmappedSourceColumns: string[];
+}
+
+export async function fetchTemplateCoverage(): Promise<DatasetCoverage[]> {
+  const res = await fetch(`${API_BASE}/tbm/coverage`);
+  if (!res.ok) throw await failed(res, "Failed to fetch template coverage");
+  return (await res.json()).datasets;
+}
+
+export async function fetchCoverageDetail(datasetId: string): Promise<CoverageDetail> {
+  const res = await fetch(`${API_BASE}/tbm/coverage/${datasetId}`);
+  if (!res.ok) throw await failed(res, "Failed to fetch column mapping");
+  return res.json();
+}
+
+/** Re-point a mapping. Flagged server-side so a pipeline re-run cannot undo it. */
+export async function overrideColumnMapping(
+  datasetId: string,
+  sourceColumn: string,
+  templateColumn: string | null
+): Promise<ColumnMappingRow> {
+  const res = await fetch(`${API_BASE}/tbm/coverage/${datasetId}/override`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sourceColumn, templateColumn }),
+  });
+  if (!res.ok) throw await failed(res, "Failed to override mapping");
+  return (await res.json()).mapping;
+}
+
+/** The customer deliverable: source data re-shaped into its master template. */
+export const refinedExportUrl = (datasetId: string) => `${API_BASE}/tbm/refined/${datasetId}.xlsx`;

@@ -15,7 +15,7 @@ import { MasterTemplate } from "./masterTemplates";
  * understate every coverage figure.
  */
 
-export type MatchMethod = "exact" | "normalized" | "contains" | "token";
+export type MatchMethod = "exact" | "normalized" | "contains" | "token" | "llm";
 
 export interface ColumnMatch {
   sourceColumn: string;

@@ -18,14 +18,25 @@ async function migrate() {
     if (applied.has(file)) continue;
     const sql = readFileSync(join(dir, file), "utf-8");
     console.log(`Applying migration ${file}...`);
-    await pool.query("begin");
+
+    // A dedicated client, not pool.query(). Supabase's transaction-mode pooler
+    // (port 6543) hands each pool.query() a potentially DIFFERENT server
+    // connection, so "begin" / DDL / "commit" issued separately can land on
+    // three different backends: the BEGIN checks out one connection, the DDL
+    // runs somewhere else, and the COMMIT commits nothing. Observed live —
+    // migration 014 reported "Applying... Migrations complete" while none of
+    // its DDL reached the database and no error was raised.
+    const client = await pool.connect();
     try {
-      await pool.query(sql);
-      await pool.query("insert into schema_migrations (name) values ($1)", [file]);
-      await pool.query("commit");
+      await client.query("begin");
+      await client.query(sql);
+      await client.query("insert into schema_migrations (name) values ($1)", [file]);
+      await client.query("commit");
     } catch (err) {
-      await pool.query("rollback");
+      await client.query("rollback").catch(() => undefined);
       throw err;
+    } finally {
+      client.release();
     }
   }
   console.log("Migrations complete.");
