@@ -74,7 +74,13 @@ export async function buildRefinedWorkbook(
     // template column -> the source column that satisfies it
     const sourceFor = new Map<string, string>();
     for (const m of mappings) {
-      if (m.template_column) sourceFor.set(m.template_column, m.source_column);
+      // Unreviewed LLM suggestions are deliberately NOT used to place data: they
+      // were measured wrong more often than right on real input. They appear in
+      // the Column Mapping sheet for review, and count only once accepted (which
+      // records them as a manual override).
+      if (m.template_column && (m.method !== "llm" || m.is_override)) {
+        sourceFor.set(m.template_column, m.source_column);
+      }
     }
 
     const sheet = workbook.addWorksheet(sheetName(template.masterType));

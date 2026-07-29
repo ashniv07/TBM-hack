@@ -36,6 +36,46 @@ function describeColumn(column: DatasetColumn): string {
   return samples.length ? `${column.column_name}. Example values: ${samples.join(", ")}` : column.column_name;
 }
 
+// LLM matches are SUGGESTIONS, never applied mappings.
+//
+// Measured across three runs on the same real AWS export, the pass returned
+// different answers each time -- coverage swung 31%, then 25%, with a correct
+// pair (AvailabilityZone -> Region) present in one run and absent the next, and
+// a wrong one (InvoiceID -> Unique ID) confidently present in both. Of 10
+// matches in the first run, 6 were wrong.
+//
+// So they are stored for a reviewer to accept or reject and are NOT counted in
+// coverage, which stays the deterministic number. A wrong mapping silently
+// writes data into the wrong template column, and an inflated coverage figure
+// is worse than an honest gap. Accepting one in the UI records it as a manual
+// override, which does count.
+//
+// Measured on the real AWS export: of 10 LLM matches, 6 were wrong, and the
+// low-confidence tail was almost entirely bad (0.5-0.7 gave "InvoiceDate ->
+// Invoice Amount", "TaxAmount -> Value", "CurrencyCode -> Primary Unit of
+// Measure"). At 0.8 the same run keeps 4 of 5. A gap is honest; a wrong mapping
+// silently writes data into the wrong template column.
+const LLM_MIN_CONFIDENCE = 0.8;
+
+// What a template column can plausibly hold, inferred from its name. Used to
+// reject type-violating pairs the model produced with real confidence:
+// "InvoiceDate -> Invoice Amount" and "BillingPeriodStartDate -> Billing
+// Entity" are both a date being written into a non-date column.
+function expectedKind(templateColumn: string): "number" | "date" | null {
+  const n = templateColumn.toLowerCase();
+  if (/\b(amount|cost|rate|qty|quantity|count|spend|price|weighting|percent)\b/.test(n)) return "number";
+  if (/\b(date|period)\b/.test(n)) return "date";
+  return null;
+}
+
+function typesCompatible(sourceType: string | null, templateColumn: string): boolean {
+  const want = expectedKind(templateColumn);
+  if (!want || !sourceType) return true;
+  if (want === "number") return sourceType === "number";
+  if (want === "date") return sourceType === "date";
+  return true;
+}
+
 /**
  * Asks an LLM which of the leftover source columns correspond to which leftover
  * template columns. It may only choose from the supplied lists and is told to
@@ -45,7 +85,8 @@ function describeColumn(column: DatasetColumn): string {
 async function llmMatchResidue(
   describedSource: string[],
   sourceColumns: string[],
-  templateColumns: string[]
+  templateColumns: string[],
+  sourceTypes: Map<string, string | null>
 ): Promise<ColumnMatch[]> {
   if (!process.env.OPENAI_API_KEY) return [];
   try {
@@ -87,12 +128,15 @@ Return JSON only:
       // column may be used once.
       if (!validSource.has(source) || !validTemplate.has(template)) continue;
       if (usedSource.has(source) || usedTemplate.has(template)) continue;
+      const confidence = Math.max(0, Math.min(1, Number(pair.confidence) || 0));
+      if (confidence < LLM_MIN_CONFIDENCE) continue;
+      if (!typesCompatible(sourceTypes.get(source) ?? null, template)) continue;
       usedSource.add(source);
       usedTemplate.add(template);
       out.push({
         sourceColumn: source,
         templateColumn: template,
-        confidence: Math.max(0, Math.min(1, Number(pair.confidence) || 0.6)),
+        confidence,
         method: "llm" as ColumnMatch["method"],
       });
     }
@@ -111,6 +155,8 @@ export interface TemplateMappingResult {
   matches: ColumnMatch[];
   missingColumns: string[];
   unmappedSourceColumns: string[];
+  /** LLM proposals awaiting human review — excluded from coverage. */
+  suggestedCount: number;
   llmMatches: number;
 }
 
@@ -136,7 +182,7 @@ export async function mapDatasetToTemplate(
     return {
       datasetId, masterType: null, expectedCount: 0, matchedCount: 0, coverage: 0,
       matches: [], missingColumns: [], unmappedSourceColumns: columnNames,
-      llmMatches: 0,
+      suggestedCount: 0, llmMatches: 0,
     };
   }
 
@@ -155,7 +201,8 @@ export async function mapDatasetToTemplate(
         return column ? describeColumn(column) : name;
       }),
       leftoverSource,
-      leftoverTemplate
+      leftoverTemplate,
+      new Map(columns.map((c) => [c.column_name, c.inferred_type]))
     );
     for (const match of resolved) {
       matches.push({ ...match, method: "llm" as ColumnMatch["method"] });
@@ -163,8 +210,12 @@ export async function mapDatasetToTemplate(
     }
   }
 
+  // Coverage counts only what was matched deterministically. Suggestions are
+  // recorded alongside but must be accepted by a human before they count.
+  const confirmed = matches.filter((m) => m.method !== "llm");
+  const suggested = matches.filter((m) => m.method === "llm");
   const matchedSource = new Set(matches.map((m) => m.sourceColumn));
-  const matchedTemplate = new Set(matches.map((m) => m.templateColumn));
+  const matchedTemplate = new Set(confirmed.map((m) => m.templateColumn));
   const missingColumns = template.expectedColumns.filter((c) => !matchedTemplate.has(c));
   const unmappedSourceColumns = columnNames.filter((c) => !matchedSource.has(c));
 
@@ -172,9 +223,9 @@ export async function mapDatasetToTemplate(
     datasetId,
     masterType: template.masterType,
     expectedCount: template.expectedColumns.length,
-    matchedCount: matches.length,
+    matchedCount: confirmed.length,
     coverage: template.expectedColumns.length
-      ? Number((matches.length / template.expectedColumns.length).toFixed(3))
+      ? Number((confirmed.length / template.expectedColumns.length).toFixed(3))
       : 0,
     mappings: [
       ...matches.map((m) => ({
@@ -192,10 +243,11 @@ export async function mapDatasetToTemplate(
     datasetId,
     masterType: template.masterType,
     expectedCount: template.expectedColumns.length,
-    matchedCount: matches.length,
+    matchedCount: confirmed.length,
     coverage: template.expectedColumns.length
-      ? Number((matches.length / template.expectedColumns.length).toFixed(3))
+      ? Number((confirmed.length / template.expectedColumns.length).toFixed(3))
       : 0,
+    suggestedCount: suggested.length,
     matches,
     missingColumns,
     unmappedSourceColumns,
