@@ -16,7 +16,7 @@ import { isTemplateScaffolding } from "../src/understanding/classifyColumns";
  *   npx ts-node packages/langgraph/scripts/generateMasterTemplates.ts
  */
 
-const DATA_DIR = path.join(__dirname, "..", "data");
+const DATA_DIR = path.join(__dirname, "..", "data", "templates");
 const OUT = path.join(__dirname, "..", "src", "templates", "masterTemplates.ts");
 
 // File name -> the master data type it defines. Explicit rather than derived,

@@ -248,8 +248,9 @@ npm run db:migrate      # applies packages/db/migrations
 npm run db:reset        # DESTRUCTIVE: drops every table in the public schema,
                         # then re-applies all migrations from scratch.
                         # The pgvector/pgcrypto extensions are preserved.
-npm run db:seed         # copies all 19 sample workbooks from
-                        # packages/langgraph/data into the uploads dir, then
+npm run db:seed         # ingests the customer source files in
+                        # packages/langgraph/data/source (NOT the master
+                        # templates in data/templates), then
                         # runs Stages 1-3 per workbook, then Stages 4, 5 and 6.
                         # Add --layers=resource_tower,cost_pool,solution to map
                         # more than the default resource_tower layer.

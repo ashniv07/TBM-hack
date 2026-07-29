@@ -17,3 +17,6 @@ export * from "./tbm/costFacts";
 export * from "./tbm/buildModel";
 export * from "./tbm/exportWorkbook";
 export * from "./assistant";
+export * from "./templates/masterTemplates";
+export * from "./templates/matchColumns";
+export * from "./templates/inferMasterType";

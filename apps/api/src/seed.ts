@@ -13,10 +13,15 @@ import {
   runStandardization,
   runUnderstanding,
 } from "@tbm/langgraph";
-import { AtumLayer, syncAtumEdgesToGraph } from "@tbm/db";
+import { AtumLayer, getDatasetColumns, syncAtumEdgesToGraph } from "@tbm/db";
+import { inferMasterType } from "@tbm/langgraph";
 import { UPLOAD_DIR } from "./routes/datasets";
 
 const DATA_DIR = path.join(__dirname, "..", "..", "..", "packages", "langgraph", "data");
+// Customer SOURCE data — the only thing that gets ingested. The master
+// workbooks in data/templates/ are the Apptio target schema, not input; they
+// are compiled into src/templates/masterTemplates.ts and never uploaded.
+const SOURCE_DIR = path.join(DATA_DIR, "source");
 const TAXONOMY_FILE = path.join(DATA_DIR, "TBM-Taxonomy-v5.0.1-Data-Table.xlsx");
 // Matches the upload route's batch size, which is sized for the pg pool.
 const CONCURRENCY = 3;
@@ -43,15 +48,23 @@ async function seed() {
   // packages/langgraph/data directly: Stage 5 writes corrected files next to
   // the source, and that directory is the pristine sample set.
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+  fs.mkdirSync(SOURCE_DIR, { recursive: true });
   const workbooks = fs
-    .readdirSync(DATA_DIR)
-    .filter((name) => /\.xlsx?$/i.test(name) && !name.startsWith("TBM-Taxonomy"))
+    .readdirSync(SOURCE_DIR)
+    .filter((name) => /\.xlsx?$/i.test(name))
     .sort();
-  if (workbooks.length === 0) throw new Error(`No workbooks found in ${DATA_DIR}`);
-  console.log(`Seeding ${workbooks.length} workbooks -> ${UPLOAD_DIR}`);
+  if (workbooks.length === 0) {
+    throw new Error(
+      `No source workbooks in ${SOURCE_DIR}.\n` +
+        `Put the customer's raw exports there — NOT the master workbooks in data/templates/, ` +
+        `which are the Apptio target schema rather than input.`
+    );
+  }
+  console.log(`Seeding ${workbooks.length} source workbook(s) -> ${UPLOAD_DIR}`);
 
   // ---- Stages 1-3, per workbook ----
   const failures: { fileName: string; stage: string; error: string }[] = [];
+  const ingestedDatasets: { datasetId: string; fileName: string }[] = [];
   let ingested = 0;
   for (let i = 0; i < workbooks.length; i += CONCURRENCY) {
     await Promise.all(
@@ -68,6 +81,7 @@ async function seed() {
           await runUnderstanding(result.datasetId);
           await runEmbedding(result.datasetId, { uploadsDir: UPLOAD_DIR, rows: result.sheet?.rows });
           ingested++;
+          ingestedDatasets.push({ datasetId: result.datasetId, fileName });
           console.log(`  [1-3] ${fileName} (${since(stepStart)})`);
         } catch (err) {
           failures.push({ fileName, stage: "understanding/embedding", error: err instanceof Error ? err.message : String(err) });
@@ -78,6 +92,26 @@ async function seed() {
   console.log(`Stages 1-3 complete: ${ingested}/${workbooks.length} datasets (${since(started)})`);
 
   // ---- Stage 4: knowledge graph across every dataset ----
+  // ---- Column coverage against the master templates ----
+  // The client's headline metric: of the columns the Apptio template expects,
+  // how many does the customer's file actually supply?
+  console.log("\nColumn coverage vs master templates:");
+  for (const { datasetId, fileName } of ingestedDatasets) {
+    const columns = (await getDatasetColumns(datasetId)).map((c) => c.column_name);
+    const guess = inferMasterType(columns);
+    if (!guess) {
+      console.log(`  ${fileName}: no master template recognised (${columns.length} columns)`);
+      continue;
+    }
+    const { coverage: cov, template } = guess;
+    console.log(
+      `  ${fileName}\n` +
+        `     -> ${template.masterType}  (runner-up: ${guess.runnerUp ?? "none"})\n` +
+        `        supplies ${cov.matchedCount}/${cov.expectedCount} expected columns = ${Math.round(cov.coverage * 100)}% coverage\n` +
+        `        ${cov.unmappedSourceColumns.length} of its ${columns.length} columns map to nothing in the template`
+    );
+  }
+
   const context = await runContextModel({ uploadsDir: UPLOAD_DIR });
   if (context.error) throw new Error(`Stage 4 failed: ${context.error}`);
   console.log(`Stage 4 complete: ${JSON.stringify(context.stats)} (${since(started)})`);
