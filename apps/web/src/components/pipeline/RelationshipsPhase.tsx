@@ -44,6 +44,7 @@ const EDGE_TYPE_LABELS: Record<string, string> = {
 };
 
 type Tab = "graph" | "browse";
+type GraphLevel = "overview" | "type" | "entity";
 
 interface Props {
   datasets: { id: string; file_name: string }[];
@@ -51,6 +52,7 @@ interface Props {
 
 function typeColor(t: string) { return TYPE_COLORS[t] ?? "#888"; }
 function typeLabel(t: string) { return TYPE_LABELS[t] ?? t; }
+const CAT_PREFIX = "cat:";
 
 export function RelationshipsPhase({ datasets }: Props) {
   const [graph,         setGraph]         = useState<ContextGraphResponse | null>(null);
@@ -59,9 +61,8 @@ export function RelationshipsPhase({ datasets }: Props) {
   const [error,         setError]         = useState("");
 
   const [tab,             setTab]             = useState<Tab>("browse");
-  const [activeTypes,     setActiveTypes]     = useState<Set<string> | null>(null); // null = all
-  const [browseType,      setBrowseType]      = useState<string | null>(null);
-  const [showIsolated,    setShowIsolated]    = useState(false);
+  const [drillType,       setDrillType]       = useState<string | null>(null); // graph tab: null = category overview
+  const [browseType,      setBrowseType]      = useState<string | null>(null); // browse tab only
   const [search,          setSearch]          = useState("");
   const [selectedEntityId,setSelectedEntityId]= useState<string | null>(null);
   const [detail,          setDetail]          = useState<ContextTraceResult | null>(null);
@@ -76,7 +77,7 @@ export function RelationshipsPhase({ datasets }: Props) {
 
   async function handleRebuild() {
     setRebuilding(true); setError(""); setRebuildResult(null);
-    setSelectedEntityId(null); setDetail(null);
+    setSelectedEntityId(null); setDetail(null); setDrillType(null);
     try {
       const r = await rebuildContextModel();
       setRebuildResult(r);
@@ -86,7 +87,18 @@ export function RelationshipsPhase({ datasets }: Props) {
     } finally { setRebuilding(false); }
   }
 
+  const businessNodes = useMemo(
+    () => graph?.nodes.filter(n => n.entity_type !== "attribute_group") ?? [],
+    [graph]
+  );
+
   async function selectEntity(id: string) {
+    // Drilling into an entity (from anywhere — a category's entity list, a
+    // search hit, or a neighbor clicked inside another entity's own ego
+    // graph) always re-anchors the breadcrumb's middle level to match it, so
+    // "Overview › {Type} › {Entity}" stays truthful to what's on screen.
+    const entity = businessNodes.find(n => n.id === id);
+    if (entity) setDrillType(entity.entity_type);
     setSelectedEntityId(id); setDetail(null); setDetailLoading(true);
     try { setDetail(await fetchContextTrace(id)); }
     catch { /* silent — drawer just shows what it has */ }
@@ -94,11 +106,16 @@ export function RelationshipsPhase({ datasets }: Props) {
   }
 
   function closeDetail() { setSelectedEntityId(null); setDetail(null); }
+  function goToOverview() { setDrillType(null); setSelectedEntityId(null); setDetail(null); setSearch(""); }
+  function goToType() { setSelectedEntityId(null); setDetail(null); }
 
-  const businessNodes = useMemo(
-    () => graph?.nodes.filter(n => n.entity_type !== "attribute_group") ?? [],
-    [graph]
-  );
+  function handleGraphNodeClick(id: string) {
+    if (drillType === null && !selectedEntityId) {
+      setDrillType(id.startsWith(CAT_PREFIX) ? id.slice(CAT_PREFIX.length) : id);
+    } else {
+      selectEntity(id);
+    }
+  }
 
   const meaningfulEdges = useMemo(
     () => graph?.edges.filter(e => e.edge_type !== "contains_reference") ?? [],
@@ -118,56 +135,104 @@ export function RelationshipsPhase({ datasets }: Props) {
     return s;
   }, [meaningfulEdges]);
 
-  const visibleTypes = activeTypes ?? new Set(Object.keys(typeCounts));
+  const idType = useMemo(() => new Map(businessNodes.map(n => [n.id, n.entity_type])), [businessNodes]);
 
-  function toggleType(type: string) {
-    setActiveTypes(prev => {
-      const base = new Set(prev ?? Object.keys(typeCounts));
-      if (base.has(type)) base.delete(type); else base.add(type);
-      return base;
-    });
-  }
+  // Level 1 — one node per entity type, with an aggregate edge between two
+  // types whenever any entities of those types are related. This is the
+  // whole graph compressed from ~280 nodes down to ~10, which is what makes
+  // it readable as a first screen instead of "a constellation of stars".
+  //
+  // "dataset" is excluded here: those nodes represent source files, not real
+  // business entities, and the only edges they ever get (structural
+  // dataset-to-dataset foreign keys) are same-type pairs — which this view
+  // already drops as self-loops. So a "Datasets" category node would always
+  // render as a floating, permanently-disconnected dot, which is exactly the
+  // "why is this here" confusion this excludes. It's still fully browsable
+  // via the sidebar and the Browse Entities tab.
+  const categoryNodes = useMemo((): VizNode[] =>
+    Object.keys(typeCounts).filter(type => type !== "dataset").map(type => ({
+      id: `${CAT_PREFIX}${type}`, entity_type: type, canonical_name: typeLabel(type), resolution_confidence: 1,
+    })), [typeCounts]);
 
-  // "Connected" has to be judged against the edges that survive the current
-  // type filter, not the whole graph — otherwise a node whose only edge leads
-  // to a type the user just filtered out reads as "connected" (it globally
-  // is) but renders with no visible edge at all, i.e. it looks exactly like
-  // the isolated nodes "show unconnected entities too" is supposed to hide.
-  const typeFilteredNodes = useMemo(
-    () => businessNodes.filter(n => visibleTypes.has(n.entity_type)),
-    [businessNodes, visibleTypes]
-  );
-
-  const typeFilteredEdges = useMemo(() => {
-    const ids = new Set(typeFilteredNodes.map(n => n.id));
-    return meaningfulEdges.filter(e => ids.has(e.from_entity_id) && ids.has(e.to_entity_id));
-  }, [meaningfulEdges, typeFilteredNodes]);
-
-  const graphNodes = useMemo((): VizNode[] => {
-    if (showIsolated) {
-      return typeFilteredNodes.map(n => ({ id: n.id, entity_type: n.entity_type, canonical_name: n.canonical_name, resolution_confidence: n.resolution_confidence }));
+  const categoryEdges = useMemo((): VizEdge[] => {
+    const agg = new Map<string, { count: number; confSum: number }>();
+    for (const e of meaningfulEdges) {
+      const ta = idType.get(e.from_entity_id);
+      const tb = idType.get(e.to_entity_id);
+      if (!ta || !tb || ta === tb) continue;
+      const key = [ta, tb].sort().join("|");
+      const cur = agg.get(key) ?? { count: 0, confSum: 0 };
+      // Postgres NUMERIC columns come back over the wire as strings (node-pg
+      // doesn't parse them to floats by default) even though ContextEdge
+      // types `confidence` as `number` — `+=` on a string concatenates
+      // instead of adding, which is what was producing "confidence NaN%" in
+      // the aggregated tooltip. Every other call site happens to use `*`,
+      // which coerces automatically, so this was the only place it broke.
+      cur.count += 1; cur.confSum += Number(e.confidence);
+      agg.set(key, cur);
     }
-    const locallyConnected = new Set<string>();
-    typeFilteredEdges.forEach(e => { locallyConnected.add(e.from_entity_id); locallyConnected.add(e.to_entity_id); });
-    return typeFilteredNodes
-      .filter(n => locallyConnected.has(n.id))
-      .map(n => ({ id: n.id, entity_type: n.entity_type, canonical_name: n.canonical_name, resolution_confidence: n.resolution_confidence }));
-  }, [typeFilteredNodes, typeFilteredEdges, showIsolated]);
+    return [...agg.entries()].map(([key, a]) => {
+      const [ta, tb] = key.split("|");
+      return {
+        from_entity_id: `${CAT_PREFIX}${ta}`, to_entity_id: `${CAT_PREFIX}${tb}`,
+        edge_type: "co_occurs_with", weight: a.count, confidence: a.confSum / a.count, label: null,
+      };
+    });
+  }, [meaningfulEdges, idType]);
 
-  const graphEdges = useMemo((): VizEdge[] => {
-    const ids = new Set(graphNodes.map(n => n.id));
-    return typeFilteredEdges
+  // Level 2 — every entity belonging to the drilled-into type.
+  const typeEntities = useMemo((): VizNode[] => {
+    if (!drillType) return [];
+    return businessNodes
+      .filter(n => n.entity_type === drillType)
+      .map(n => ({ id: n.id, entity_type: n.entity_type, canonical_name: n.canonical_name, resolution_confidence: n.resolution_confidence }));
+  }, [businessNodes, drillType]);
+
+  const typeEdges = useMemo((): VizEdge[] => {
+    if (!drillType) return [];
+    const ids = new Set(typeEntities.map(n => n.id));
+    return meaningfulEdges
       .filter(e => ids.has(e.from_entity_id) && ids.has(e.to_entity_id))
       .map(e => ({ from_entity_id: e.from_entity_id, to_entity_id: e.to_entity_id, edge_type: e.edge_type, weight: e.weight, confidence: e.confidence, label: e.label }));
-  }, [typeFilteredEdges, graphNodes]);
+  }, [meaningfulEdges, typeEntities, drillType]);
+
+  // Level 3 — the selected entity's own ego network: its *direct* connections
+  // only. `detail` comes from a depth-6 trace, so filtering just to real edge
+  // types (as before) still let in everything reachable within 6 hops — for
+  // a well-connected entity that's most of the graph again, the same
+  // hairball problem one level up. The drawer's "Connections (N)" list was
+  // already correctly scoped to direct edges; the canvas needs to match it.
+  const entityGraphEdges = useMemo((): VizEdge[] => {
+    if (!selectedEntityId) return [];
+    return (detail?.edges ?? [])
+      .filter(e => e.edge_type !== "contains_reference" && (e.from_entity_id === selectedEntityId || e.to_entity_id === selectedEntityId))
+      .map(e => ({ from_entity_id: e.from_entity_id, to_entity_id: e.to_entity_id, edge_type: e.edge_type, weight: e.weight, confidence: e.confidence, label: e.label }));
+  }, [detail, selectedEntityId]);
+  const entityGraphNodes = useMemo((): VizNode[] => {
+    if (!detail || !selectedEntityId) return [];
+    const ids = new Set<string>([selectedEntityId]);
+    entityGraphEdges.forEach(e => { ids.add(e.from_entity_id); ids.add(e.to_entity_id); });
+    return detail.nodes.filter(n => ids.has(n.id))
+      .map(n => ({ id: n.id, entity_type: n.entity_type, canonical_name: n.canonical_name, resolution_confidence: n.resolution_confidence }));
+  }, [detail, selectedEntityId, entityGraphEdges]);
+
+  const graphLevel: GraphLevel = selectedEntityId ? "entity" : drillType ? "type" : "overview";
+  const currentGraphNodes = graphLevel === "overview" ? categoryNodes : graphLevel === "type" ? typeEntities : entityGraphNodes;
+  const currentGraphEdges = graphLevel === "overview" ? categoryEdges : graphLevel === "type" ? typeEdges : entityGraphEdges;
+
+  const searchResults = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return [];
+    return businessNodes.filter(n => n.canonical_name.toLowerCase().includes(q)).slice(0, 60);
+  }, [search, businessNodes]);
 
   const browseResults = useMemo(() => {
     const q = search.trim().toLowerCase();
     let list = businessNodes;
     if (browseType) list = list.filter(n => n.entity_type === browseType);
-    if (q) list = list.filter(n => n.canonical_name.toLowerCase().includes(q));
+    if (tab === "browse" && q) list = list.filter(n => n.canonical_name.toLowerCase().includes(q));
     return list.slice(0, 400);
-  }, [businessNodes, browseType, search]);
+  }, [businessNodes, browseType, search, tab]);
 
   const selectedEntity = businessNodes.find(n => n.id === selectedEntityId) ?? null;
 
@@ -229,9 +294,31 @@ export function RelationshipsPhase({ datasets }: Props) {
           <button className={`dq-tab ${tab === "browse" ? "active" : ""}`} onClick={() => setTab("browse")}>Browse Entities</button>
           {!hasGraph && (
             <span className="text-dim" style={{ fontSize: 10, marginLeft: 8 }}>
-              No relationships detected yet — browsing entities only
+              No cross-entity relationships detected yet — categories still browsable
             </span>
           )}
+        </div>
+      )}
+
+      {/* Breadcrumb (graph tab only) */}
+      {tab === "graph" && graph && graph.nodes.length > 0 && (
+        <div className="graph-breadcrumb">
+          <button className="crumb-btn" onClick={goToOverview}>Overview</button>
+          {drillType && (
+            <>
+              <span className="sep">›</span>
+              <button className="crumb-btn" onClick={goToType}>{typeLabel(drillType)}</button>
+            </>
+          )}
+          {selectedEntity && (
+            <>
+              <span className="sep">›</span>
+              <span style={{ color: "var(--text-primary)" }}>{selectedEntity.canonical_name}</span>
+            </>
+          )}
+          <span className="text-muted" style={{ fontSize: 10, marginLeft: 8 }}>
+            {graphLevel === "overview" ? "Click a category to drill in" : graphLevel === "type" ? "Click an entity to see its connections" : "Click a connection to explore it"}
+          </span>
         </div>
       )}
 
@@ -269,64 +356,104 @@ export function RelationshipsPhase({ datasets }: Props) {
                 />
               </div>
               <div style={{ flex: 1, overflow: "auto", padding: "10px 10px" }}>
-                <p className="section-eyebrow" style={{ padding: "0 2px", marginBottom: 8 }}>
-                  {tab === "graph" ? "Filter by type" : "Entity types"}
-                </p>
-                {Object.entries(typeCounts).sort((a, b) => b[1] - a[1]).map(([type, count]) => {
-                  const color = typeColor(type);
-                  const active = tab === "graph" ? visibleTypes.has(type) : browseType === type;
-                  return (
-                    <button
-                      key={type}
-                      onClick={() => tab === "graph" ? toggleType(type) : setBrowseType(p => p === type ? null : type)}
-                      style={{
-                        display: "flex", alignItems: "center", width: "100%", gap: 8,
-                        background: active ? `${color}18` : "transparent",
-                        border: `1px solid ${active ? color : "transparent"}`,
-                        borderRadius: 2, padding: "6px 8px", marginBottom: 2, cursor: "pointer", textAlign: "left",
-                      }}
-                    >
-                      <span style={{ width: 8, height: 8, borderRadius: "50%", background: color, flexShrink: 0, opacity: active ? 1 : 0.4 }} />
-                      <span style={{ flex: 1, fontSize: 11.5, color: active ? "var(--text-primary)" : "var(--text-muted)" }}>{typeLabel(type)}</span>
-                      <span style={{ fontSize: 10.5, color: "var(--text-dim)" }}>{count}</span>
+                {tab === "graph" && search.trim() ? (
+                  <>
+                    <p className="section-eyebrow" style={{ padding: "0 2px", marginBottom: 8 }}>Search results</p>
+                    {searchResults.length === 0 && <div className="text-dim" style={{ fontSize: 11, padding: "0 2px" }}>No matches</div>}
+                    {searchResults.map(n => (
+                      <button
+                        key={n.id}
+                        onClick={() => selectEntity(n.id)}
+                        style={{ display: "flex", alignItems: "center", width: "100%", gap: 8, background: n.id === selectedEntityId ? `${typeColor(n.entity_type)}18` : "transparent", border: "1px solid transparent", borderRadius: 2, padding: "6px 8px", marginBottom: 2, cursor: "pointer", textAlign: "left" }}
+                      >
+                        <span style={{ width: 8, height: 8, borderRadius: "50%", background: typeColor(n.entity_type), flexShrink: 0 }} />
+                        <span style={{ flex: 1, fontSize: 11.5, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{n.canonical_name}</span>
+                        <span style={{ fontSize: 9.5, color: "var(--text-dim)" }}>{typeLabel(n.entity_type)}</span>
+                      </button>
+                    ))}
+                  </>
+                ) : tab === "graph" && drillType ? (
+                  <>
+                    <p className="section-eyebrow" style={{ padding: "0 2px", marginBottom: 8 }}>{typeLabel(drillType)}</p>
+                    <button onClick={goToOverview} style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", background: "transparent", border: "none", color: "var(--accent)", fontSize: 11, padding: "0 2px", marginBottom: 8, cursor: "pointer" }}>
+                      ← All categories
                     </button>
-                  );
-                })}
-                {tab === "graph" && (
-                  <label style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 12, padding: "0 2px", fontSize: 11, color: "var(--text-muted)", cursor: "pointer" }}>
-                    <input type="checkbox" checked={showIsolated} onChange={e => setShowIsolated(e.target.checked)} />
-                    Show unconnected entities too
-                  </label>
+                    {typeEntities.map(n => (
+                      <button
+                        key={n.id}
+                        onClick={() => selectEntity(n.id)}
+                        style={{
+                          display: "flex", alignItems: "center", width: "100%", gap: 8,
+                          background: n.id === selectedEntityId ? `${typeColor(n.entity_type)}18` : "transparent",
+                          border: `1px solid ${n.id === selectedEntityId ? typeColor(n.entity_type) : "transparent"}`,
+                          borderRadius: 2, padding: "6px 8px", marginBottom: 2, cursor: "pointer", textAlign: "left",
+                        }}
+                      >
+                        <span style={{ width: 8, height: 8, borderRadius: "50%", background: typeColor(n.entity_type), flexShrink: 0 }} />
+                        <span style={{ flex: 1, fontSize: 11.5, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{n.canonical_name}</span>
+                      </button>
+                    ))}
+                  </>
+                ) : (
+                  <>
+                    <p className="section-eyebrow" style={{ padding: "0 2px", marginBottom: 8 }}>
+                      {tab === "graph" ? "Categories" : "Entity types"}
+                    </p>
+                    {Object.entries(typeCounts).sort((a, b) => b[1] - a[1]).map(([type, count]) => {
+                      const color = typeColor(type);
+                      const active = tab === "browse" && browseType === type;
+                      return (
+                        <button
+                          key={type}
+                          onClick={() => tab === "graph" ? setDrillType(type) : setBrowseType(p => p === type ? null : type)}
+                          style={{
+                            display: "flex", alignItems: "center", width: "100%", gap: 8,
+                            background: active ? `${color}18` : "transparent",
+                            border: `1px solid ${active ? color : "transparent"}`,
+                            borderRadius: 2, padding: "6px 8px", marginBottom: 2, cursor: "pointer", textAlign: "left",
+                          }}
+                        >
+                          <span style={{ width: 8, height: 8, borderRadius: "50%", background: color, flexShrink: 0, opacity: active ? 1 : 0.7 }} />
+                          <span style={{ flex: 1, fontSize: 11.5, color: active ? "var(--text-primary)" : "var(--text-muted)" }}>{typeLabel(type)}</span>
+                          <span style={{ fontSize: 10.5, color: "var(--text-dim)" }}>{count}</span>
+                        </button>
+                      );
+                    })}
+                  </>
                 )}
               </div>
             </div>
 
             {/* Main */}
             <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-              {!hasGraph && tab === "graph" && (
+              {!hasGraph && tab === "graph" && graphLevel === "overview" && (
                 <div style={{ padding: "10px 22px", background: "rgba(205,222,51,0.05)", borderBottom: "1px solid rgba(205,222,51,0.15)", display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
                   <span style={{ color: "var(--accent)", fontSize: 14 }}>ℹ</span>
                   <span style={{ fontSize: 11, color: "var(--text-muted)", lineHeight: 1.6 }}>
                     <strong style={{ color: "var(--text-primary)" }}>{totalEntities} entities detected</strong> across {datasets.length} datasets, but no cross-dataset relationships have been built yet.
                     Relationships are discovered when entities share foreign-key columns or co-occur in the same row, or when
                     <strong style={{ color: "var(--accent)" }}> Sync to Graph</strong> in the ATUM Mapping phase links entities to taxonomy categories.
-                    Try <strong style={{ color: "var(--accent)" }}>Rebuild Again</strong>, or switch to <strong style={{ color: "var(--accent)" }}>Browse Entities</strong> to explore what was detected.
+                    Categories below are still browsable — click one to see its entities.
                   </span>
                 </div>
               )}
 
               {tab === "graph" ? (
-                graphNodes.length === 0 ? (
-                  <div className="empty-state">
-                    <div>No relationships to show for the current filters.</div>
-                    {!showIsolated && <div style={{ fontSize: 11 }}>Try enabling "Show unconnected entities too".</div>}
-                  </div>
+                currentGraphNodes.length === 0 ? (
+                  detailLoading ? (
+                    <div className="loading-overlay"><span className="spinner" /> Loading connections…</div>
+                  ) : (
+                    <div className="empty-state">
+                      <div>{graphLevel === "entity" ? "No relationships detected for this entity yet." : "Nothing to show here yet."}</div>
+                    </div>
+                  )
                 ) : (
                   <GraphVisualization
-                    nodes={graphNodes}
-                    edges={graphEdges}
+                    key={graphLevel === "type" ? `type:${drillType}` : graphLevel === "entity" ? `entity:${selectedEntityId}` : "overview"}
+                    nodes={currentGraphNodes}
+                    edges={currentGraphEdges}
                     selectedId={selectedEntityId ?? undefined}
-                    onSelectNode={selectEntity}
+                    onSelectNode={handleGraphNodeClick}
                   />
                 )
               ) : (

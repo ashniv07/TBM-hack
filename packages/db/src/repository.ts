@@ -815,19 +815,17 @@ export async function traceFromEntity(
   edges: (ContextEdgeRow & { from_name: string; to_name: string })[];
 }> {
   const { rows: reach } = await getPool().query(
-    `with recursive traversal(entity_id, depth, path) as (
-       select $1::uuid, 0, array[$1::uuid]
-       union all
+    `with recursive traversal(entity_id, depth) as (
+       select $1::uuid, 0
+       union
        select
          case when e.from_entity_id = t.entity_id then e.to_entity_id else e.from_entity_id end,
-         t.depth + 1,
-         t.path || (case when e.from_entity_id = t.entity_id then e.to_entity_id else e.from_entity_id end)
+         t.depth + 1
        from traversal t
        join context_edges e on e.from_entity_id = t.entity_id or e.to_entity_id = t.entity_id
        where t.depth < $2
-         and not ((case when e.from_entity_id = t.entity_id then e.to_entity_id else e.from_entity_id end) = any(t.path))
      )
-     select entity_id, min(depth) as depth from traversal group by entity_id order by depth asc`,
+     select entity_id, min(depth) as depth from traversal group by entity_id order by depth asc limit 2000`,
     [entityId, maxDepth]
   );
 

@@ -1,0 +1,48 @@
+{
+   "action": {
+      "icons": {
+         "48": "assets/icon48.png"
+      }
+   },
+   "background": {
+      "service_worker": "service-worker-loader.js",
+      "type": "module"
+   },
+   "commands": {
+      "debug": {
+         "description": "Debug"
+      }
+   },
+   "content_scripts": [ {
+      "js": [ "assets/inject-existence.js-loader-b9e83f5f.js" ],
+      "matches": [ "https://api.eu-1.crowdstrike.com/identity-protection/entities/jitbot/requests/v1*", "https://api.us-2.crowdstrike.com/identity-protection/entities/jitbot/requests/v1*", "https://api.crowdstrike.com/identity-protection/entities/jitbot/requests/v1*", "https://api.dodo.crowdstrike.black/identity-protection/entities/jitbot/requests/v1*", "https://api.dodo.crowdstrike.red/identity-protection/entities/jitbot/requests/v1*" ],
+      "run_at": "document_start"
+   } ],
+   "description": "Falcon browser extension",
+   "host_permissions": [ "\u003Call_urls>" ],
+   "icons": {
+      "48": "assets/icon48.png"
+   },
+   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA1IyDydPk5Ap6n72JRV0CzrxQF70vSzNyLrGh5puJ6NMTpZowTMSVTKRHKfkqjFmGsFWhw79bvAx1kfyJwWcIUGPBeOEa9E7xetcIhAW+0xbzV777P2h9oYTJ3XFlbCmJDAe9sSYeintFX0TS0qYtRv/65KgG3SpywnDb5PAKRIgVEOR/PF+t1wZ50nL4BkgVXnjcHKiDidCC9JuwDFabr157IjH9CwsTUvUtjTxXFDuZb531M1B3oj+WwHmj5kFvYBSyugwxHnP9ug1XGlR19pUXa6kc1cVK5vauAIc1PfAhRiC3fh9LyE6ZYJKsmRXCj3WmmRc1mUUSLoR6sOYhRwIDAQAB",
+   "manifest_version": 3,
+   "name": "CrowdStrike",
+   "permissions": [ "tabs", "clipboardRead", "clipboardWrite", "scripting", "storage", "unlimitedStorage", "downloads", "webRequest", "webRequestBlocking", "nativeMessaging", "notifications", "offscreen", "webNavigation", "sidePanel", "omnibox", "alarms" ],
+   "side_panel": {
+      "default_path": "src/core/lib/debug/panel/panel.html"
+   },
+   "update_url": "https://update-crx.falcon.crowdstrike.com/v2/update.xml",
+   "version": "2.0.28",
+   "web_accessible_resources": [ {
+      "matches": [ "\u003Call_urls>" ],
+      "resources": [ "src/modules/aidr/lib/access/*" ],
+      "use_dynamic_url": true
+   }, {
+      "matches": [ "https://api.crowdstrike.com/*", "https://api.dodo.crowdstrike.black/*", "https://api.dodo.crowdstrike.red/*", "https://api.eu-1.crowdstrike.com/*", "https://api.us-2.crowdstrike.com/*" ],
+      "resources": [ "assets/inject-existence.js-b9ed571d.js" ],
+      "use_dynamic_url": false
+   }, {
+      "matches": [ "http://*/*", "https://*/*" ],
+      "resources": [ "assets/ExtCSBaseModule-141f030e.js", "assets/BaseMessengerService-2acff04f.js", "assets/NSIsolatedWorldMessenger-c50ef193.js", "assets/topics-2d483ae2.js", "assets/Log-c8b2fce8.js", "assets/NSMessengerBase-42dc7d4d.js", "assets/index.ts-ec2d9356.js", "assets/topics-c24efe4c.js", "assets/index.ts-6e7814ff.js", "assets/utils-01a6ca1a.js", "assets/ExtCSModule-18230a2e.js", "assets/index.ts-11584c00.js", "assets/Clipboard-aa58cee9.js", "assets/ExpiringCache-caa11f7a.js", "assets/index.ts-eb297f67.js", "assets/index.ts-575d5bb0.js", "assets/index.ts-1e6020a5.js", "assets/sfp.js-94ac819c.js", "assets/upd.js-d0c3794d.js", "assets/dtc.js-4c7080c9.js", "assets/uic.js-57791703.js", "assets/dnd.js-8396bb97.js", "assets/ecih.js-e1eb932d.js", "assets/nclp.js-bf110cc0.js", "assets/mtc.js-8c6fa48f.js" ],
+      "use_dynamic_url": false
+   } ]
+}

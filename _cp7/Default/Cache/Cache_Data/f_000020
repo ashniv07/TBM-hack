@@ -1,0 +1,660 @@
+import { createHotContext as __vite__createHotContext } from "/@vite/client";import.meta.hot = __vite__createHotContext("/src/components/pipeline/AtumPhase.tsx");import __vite__cjsImport0_react_jsxDevRuntime from "/node_modules/.vite/deps/react_jsx-dev-runtime.js?v=e072b010"; const Fragment = __vite__cjsImport0_react_jsxDevRuntime["Fragment"]; const jsxDEV = __vite__cjsImport0_react_jsxDevRuntime["jsxDEV"];
+import * as RefreshRuntime from "/@react-refresh";
+const inWebWorker = typeof WorkerGlobalScope !== "undefined" && self instanceof WorkerGlobalScope;
+let prevRefreshReg;
+let prevRefreshSig;
+if (import.meta.hot && !inWebWorker) {
+  if (!window.$RefreshReg$) {
+    throw new Error(
+      "@vitejs/plugin-react can't detect preamble. Something is wrong."
+    );
+  }
+  prevRefreshReg = window.$RefreshReg$;
+  prevRefreshSig = window.$RefreshSig$;
+  window.$RefreshReg$ = RefreshRuntime.getRefreshReg("C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx");
+  window.$RefreshSig$ = RefreshRuntime.createSignatureFunctionForTransform;
+}
+var _s = $RefreshSig$();
+import __vite__cjsImport3_react from "/node_modules/.vite/deps/react.js?v=e072b010"; const useMemo = __vite__cjsImport3_react["useMemo"]; const useState = __vite__cjsImport3_react["useState"]; const useEffect = __vite__cjsImport3_react["useEffect"];
+import {
+  fetchAtumMappings,
+  fetchAtumReport,
+  fetchAtumTaxonomy,
+  importAtumTaxonomy,
+  reviewAtumMapping,
+  runAtumMapping,
+  syncAtumGraph
+} from "/src/api.ts";
+export function AtumPhase() {
+  _s();
+  const [layer, setLayer] = useState("resource_tower");
+  const [mappings, setMappings] = useState([]);
+  const [taxonomy, setTaxonomy] = useState([]);
+  const [report, setReport] = useState(null);
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [useLlm, setUseLlm] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const [runDetails, setRunDetails] = useState("");
+  const [error, setError] = useState("");
+  const [expanded, setExpanded] = useState(/* @__PURE__ */ new Set());
+  async function refresh(l = layer) {
+    const [m, t, r] = await Promise.all([fetchAtumMappings(l), fetchAtumTaxonomy(l), fetchAtumReport()]);
+    setMappings(m);
+    setTaxonomy(t);
+    setReport(r);
+  }
+  useEffect(() => {
+    setBusy(true);
+    refresh().finally(() => setBusy(false));
+  }, []);
+  async function exec(fn, ok) {
+    setBusy(true);
+    setError("");
+    setMessage("");
+    try {
+      await fn();
+      await refresh();
+      setMessage(ok);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Operation failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function changeLayer(next) {
+    setLayer(next);
+    setBusy(true);
+    setError("");
+    try {
+      await refresh(next);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load");
+    } finally {
+      setBusy(false);
+    }
+  }
+  function toggleRow(id) {
+    setExpanded((p) => {
+      const n = new Set(p);
+      n.has(id) ? n.delete(id) : n.add(id);
+      return n;
+    });
+  }
+  const visible = useMemo(
+    () => statusFilter === "all" ? mappings : mappings.filter((m) => m.status === statusFilter),
+    [mappings, statusFilter]
+  );
+  function confClass(c) {
+    return c >= 0.8 ? "badge-confidence-high" : c >= 0.6 ? "badge-confidence-medium" : "badge-confidence-low";
+  }
+  return /* @__PURE__ */ jsxDEV("div", { className: "phase-panel column", children: [
+    /* @__PURE__ */ jsxDEV("div", { className: "phase-header", children: [
+      /* @__PURE__ */ jsxDEV("div", { children: [
+        /* @__PURE__ */ jsxDEV("p", { className: "phase-subtitle", children: "Phase 3" }, void 0, false, {
+          fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+          lineNumber: 83,
+          columnNumber: 11
+        }, this),
+        /* @__PURE__ */ jsxDEV("h2", { className: "phase-title", children: "ATUM Mapping" }, void 0, false, {
+          fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+          lineNumber: 84,
+          columnNumber: 11
+        }, this)
+      ] }, void 0, true, {
+        fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+        lineNumber: 82,
+        columnNumber: 9
+      }, this),
+      report && /* @__PURE__ */ jsxDEV("div", { className: "stat-chips", style: { margin: "0 8px" }, children: [
+        /* @__PURE__ */ jsxDEV("div", { className: "stat-chip accent", children: [
+          " ",
+          /* @__PURE__ */ jsxDEV("div", { className: "stat-chip-value", children: report.total }, void 0, false, {
+            fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+            lineNumber: 88,
+            columnNumber: 48
+          }, this),
+          "                                   ",
+          /* @__PURE__ */ jsxDEV("div", { className: "stat-chip-label", children: "Candidates" }, void 0, false, {
+            fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+            lineNumber: 88,
+            columnNumber: 136
+          }, this)
+        ] }, void 0, true, {
+          fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+          lineNumber: 88,
+          columnNumber: 13
+        }, this),
+        /* @__PURE__ */ jsxDEV("div", { className: "stat-chip success", children: [
+          /* @__PURE__ */ jsxDEV("div", { className: "stat-chip-value", children: [
+            Math.round(report.coverage * 100),
+            "%"
+          ] }, void 0, true, {
+            fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+            lineNumber: 89,
+            columnNumber: 48
+          }, this),
+          "            ",
+          /* @__PURE__ */ jsxDEV("div", { className: "stat-chip-label", children: "Coverage" }, void 0, false, {
+            fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+            lineNumber: 89,
+            columnNumber: 135
+          }, this)
+        ] }, void 0, true, {
+          fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+          lineNumber: 89,
+          columnNumber: 13
+        }, this),
+        /* @__PURE__ */ jsxDEV("div", { className: "stat-chip", children: [
+          "        ",
+          /* @__PURE__ */ jsxDEV("div", { className: "stat-chip-value", children: [
+            Math.round(report.averageConfidence * 100),
+            "%"
+          ] }, void 0, true, {
+            fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+            lineNumber: 90,
+            columnNumber: 48
+          }, this),
+          "   ",
+          /* @__PURE__ */ jsxDEV("div", { className: "stat-chip-label", children: "Avg Confidence" }, void 0, false, {
+            fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+            lineNumber: 90,
+            columnNumber: 135
+          }, this)
+        ] }, void 0, true, {
+          fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+          lineNumber: 90,
+          columnNumber: 13
+        }, this),
+        /* @__PURE__ */ jsxDEV("div", { className: "stat-chip warning", children: [
+          /* @__PURE__ */ jsxDEV("div", { className: "stat-chip-value", children: report.byStatus?.["suggested"] ?? 0 }, void 0, false, {
+            fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+            lineNumber: 91,
+            columnNumber: 48
+          }, this),
+          "           ",
+          /* @__PURE__ */ jsxDEV("div", { className: "stat-chip-label", children: "Need Review" }, void 0, false, {
+            fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+            lineNumber: 91,
+            columnNumber: 135
+          }, this)
+        ] }, void 0, true, {
+          fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+          lineNumber: 91,
+          columnNumber: 13
+        }, this)
+      ] }, void 0, true, {
+        fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+        lineNumber: 87,
+        columnNumber: 9
+      }, this),
+      /* @__PURE__ */ jsxDEV("div", { style: { display: "flex", gap: 6, marginLeft: "auto", flexWrap: "wrap" }, children: [
+        /* @__PURE__ */ jsxDEV("button", { className: "btn btn-secondary btn-sm", disabled: busy, onClick: () => exec(importAtumTaxonomy, "Taxonomy imported."), children: "Import Taxonomy" }, void 0, false, {
+          fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+          lineNumber: 95,
+          columnNumber: 11
+        }, this),
+        /* @__PURE__ */ jsxDEV(
+          "button",
+          {
+            className: "btn btn-primary   btn-sm",
+            disabled: busy,
+            onClick: () => exec(async () => {
+              const ALL_LAYERS = ["resource_tower", "cost_pool", "solution"];
+              let totalMapped = 0, totalCandidates = 0;
+              for (const l of ALL_LAYERS) {
+                const { stats } = await runAtumMapping(l, useLlm);
+                totalMapped += stats.mapped;
+                totalCandidates += stats.candidates;
+              }
+              setRunDetails(`Mapped ${totalMapped}/${totalCandidates} across all 3 layers.`);
+              await refresh(layer);
+            }, "Mapping complete."),
+            children: busy ? /* @__PURE__ */ jsxDEV(Fragment, { children: [
+              /* @__PURE__ */ jsxDEV("span", { className: "spinner" }, void 0, false, {
+                fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+                lineNumber: 108,
+                columnNumber: 23
+              }, this),
+              " Running…"
+            ] }, void 0, true, {
+              fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+              lineNumber: 108,
+              columnNumber: 21
+            }, this) : mappings.length > 0 ? "Run Again" : "Run Mapping"
+          },
+          void 0,
+          false,
+          {
+            fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+            lineNumber: 96,
+            columnNumber: 11
+          },
+          this
+        ),
+        /* @__PURE__ */ jsxDEV(
+          "button",
+          {
+            className: "btn btn-secondary btn-sm",
+            disabled: busy,
+            onClick: () => exec(async () => {
+              const ALL_LAYERS = ["resource_tower", "cost_pool", "solution"];
+              let totalEdges = 0, totalCategories = 0;
+              for (const l of ALL_LAYERS) {
+                const r = await syncAtumGraph(l);
+                totalEdges += r.edges;
+                totalCategories += r.categories;
+              }
+              setRunDetails(`${totalEdges} ATUM edges written across ${totalCategories} categories (all 3 layers) — go to the Relationships phase to explore updated connections.`);
+            }, "Graph synced."),
+            children: "Sync to Graph"
+          },
+          void 0,
+          false,
+          {
+            fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+            lineNumber: 110,
+            columnNumber: 11
+          },
+          this
+        ),
+        /* @__PURE__ */ jsxDEV("button", { className: "btn btn-ghost btn-sm", disabled: busy, onClick: () => exec(() => refresh(), "Refreshed."), children: "Refresh" }, void 0, false, {
+          fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+          lineNumber: 123,
+          columnNumber: 11
+        }, this)
+      ] }, void 0, true, {
+        fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+        lineNumber: 94,
+        columnNumber: 9
+      }, this)
+    ] }, void 0, true, {
+      fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+      lineNumber: 81,
+      columnNumber: 7
+    }, this),
+    /* @__PURE__ */ jsxDEV("div", { className: "dq-tabs", style: { gap: 0 }, children: [
+      [["resource_tower", "Resource Towers"], ["cost_pool", "Cost Pools"], ["solution", "Technology Solutions"]].map(
+        ([l, label]) => /* @__PURE__ */ jsxDEV("button", { className: `dq-tab ${layer === l ? "active" : ""}`, onClick: () => changeLayer(l), children: label }, l, false, {
+          fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+          lineNumber: 130,
+          columnNumber: 9
+        }, this)
+      ),
+      /* @__PURE__ */ jsxDEV("div", { style: { marginLeft: "auto", display: "flex", alignItems: "center", gap: 8, paddingRight: 4 }, children: [
+        /* @__PURE__ */ jsxDEV("label", { className: "toggle", children: [
+          /* @__PURE__ */ jsxDEV("input", { type: "checkbox", checked: useLlm, onChange: (e) => setUseLlm(e.target.checked) }, void 0, false, {
+            fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+            lineNumber: 134,
+            columnNumber: 13
+          }, this),
+          "AI refinement"
+        ] }, void 0, true, {
+          fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+          lineNumber: 133,
+          columnNumber: 11
+        }, this),
+        /* @__PURE__ */ jsxDEV("select", { className: "athena-select", value: statusFilter, onChange: (e) => setStatusFilter(e.target.value), children: [
+          /* @__PURE__ */ jsxDEV("option", { value: "all", children: "All statuses" }, void 0, false, {
+            fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+            lineNumber: 138,
+            columnNumber: 13
+          }, this),
+          /* @__PURE__ */ jsxDEV("option", { value: "suggested", children: "Needs review" }, void 0, false, {
+            fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+            lineNumber: 139,
+            columnNumber: 13
+          }, this),
+          /* @__PURE__ */ jsxDEV("option", { value: "approved", children: "Approved" }, void 0, false, {
+            fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+            lineNumber: 140,
+            columnNumber: 13
+          }, this),
+          /* @__PURE__ */ jsxDEV("option", { value: "overridden", children: "Overridden" }, void 0, false, {
+            fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+            lineNumber: 141,
+            columnNumber: 13
+          }, this),
+          /* @__PURE__ */ jsxDEV("option", { value: "unresolved", children: "Unresolved" }, void 0, false, {
+            fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+            lineNumber: 142,
+            columnNumber: 13
+          }, this),
+          /* @__PURE__ */ jsxDEV("option", { value: "rejected", children: "Rejected" }, void 0, false, {
+            fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+            lineNumber: 143,
+            columnNumber: 13
+          }, this)
+        ] }, void 0, true, {
+          fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+          lineNumber: 137,
+          columnNumber: 11
+        }, this)
+      ] }, void 0, true, {
+        fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+        lineNumber: 132,
+        columnNumber: 9
+      }, this)
+    ] }, void 0, true, {
+      fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+      lineNumber: 128,
+      columnNumber: 7
+    }, this),
+    message && /* @__PURE__ */ jsxDEV("div", { className: "success-bar", style: { margin: "0 22px" }, children: [
+      message,
+      runDetails && /* @__PURE__ */ jsxDEV("span", { className: "text-muted normal-case", style: { fontSize: 11 }, children: [
+        " — ",
+        runDetails
+      ] }, void 0, true, {
+        fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+        lineNumber: 150,
+        columnNumber: 35
+      }, this)
+    ] }, void 0, true, {
+      fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+      lineNumber: 149,
+      columnNumber: 7
+    }, this),
+    error && /* @__PURE__ */ jsxDEV("div", { className: "error-bar", style: { margin: "0 22px" }, children: error }, void 0, false, {
+      fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+      lineNumber: 153,
+      columnNumber: 17
+    }, this),
+    /* @__PURE__ */ jsxDEV("div", { style: { flex: 1, overflow: "auto" }, children: visible.length === 0 ? /* @__PURE__ */ jsxDEV("div", { className: "empty-state", children: [
+      /* @__PURE__ */ jsxDEV("div", { className: "empty-icon", children: "🗂" }, void 0, false, {
+        fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+        lineNumber: 159,
+        columnNumber: 13
+      }, this),
+      /* @__PURE__ */ jsxDEV("div", { style: { textAlign: "center" }, children: busy ? "Loading…" : mappings.length === 0 && (report?.total ?? 0) === 0 ? "Import taxonomy then click Run Mapping to generate ATUM classifications" : mappings.length === 0 ? `No mappings for this layer yet — click “Run Mapping” to classify ${layer.replace(/_/g, " ")}s` : "No mappings match the current filter" }, void 0, false, {
+        fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+        lineNumber: 160,
+        columnNumber: 13
+      }, this)
+    ] }, void 0, true, {
+      fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+      lineNumber: 158,
+      columnNumber: 9
+    }, this) : /* @__PURE__ */ jsxDEV("table", { className: "athena-table", children: [
+      /* @__PURE__ */ jsxDEV("thead", { children: /* @__PURE__ */ jsxDEV("tr", { children: [
+        /* @__PURE__ */ jsxDEV("th", { children: "Source Value" }, void 0, false, {
+          fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+          lineNumber: 174,
+          columnNumber: 17
+        }, this),
+        /* @__PURE__ */ jsxDEV("th", { children: "Dataset / Role" }, void 0, false, {
+          fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+          lineNumber: 175,
+          columnNumber: 17
+        }, this),
+        /* @__PURE__ */ jsxDEV("th", { children: "ATUM Classification" }, void 0, false, {
+          fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+          lineNumber: 176,
+          columnNumber: 17
+        }, this),
+        /* @__PURE__ */ jsxDEV("th", { children: "Confidence" }, void 0, false, {
+          fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+          lineNumber: 177,
+          columnNumber: 17
+        }, this),
+        /* @__PURE__ */ jsxDEV("th", { children: "Evidence" }, void 0, false, {
+          fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+          lineNumber: 178,
+          columnNumber: 17
+        }, this),
+        /* @__PURE__ */ jsxDEV("th", { children: "Review" }, void 0, false, {
+          fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+          lineNumber: 179,
+          columnNumber: 17
+        }, this)
+      ] }, void 0, true, {
+        fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+        lineNumber: 173,
+        columnNumber: 15
+      }, this) }, void 0, false, {
+        fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+        lineNumber: 172,
+        columnNumber: 13
+      }, this),
+      /* @__PURE__ */ jsxDEV("tbody", { children: visible.map(
+        (m) => /* @__PURE__ */ jsxDEV("tr", { children: [
+          /* @__PURE__ */ jsxDEV("td", { style: { fontWeight: 600 }, children: m.source_value }, void 0, false, {
+            fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+            lineNumber: 185,
+            columnNumber: 19
+          }, this),
+          /* @__PURE__ */ jsxDEV("td", { style: { fontSize: 11 }, children: [
+            /* @__PURE__ */ jsxDEV("div", { className: "text-muted", children: m.dataset_file_name }, void 0, false, {
+              fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+              lineNumber: 187,
+              columnNumber: 21
+            }, this),
+            m.semantic_role && /* @__PURE__ */ jsxDEV("span", { className: "source-badge", style: { fontSize: "8px", marginTop: 2, display: "inline-block" }, children: m.semantic_role }, void 0, false, {
+              fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+              lineNumber: 188,
+              columnNumber: 41
+            }, this)
+          ] }, void 0, true, {
+            fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+            lineNumber: 186,
+            columnNumber: 19
+          }, this),
+          /* @__PURE__ */ jsxDEV("td", { children: [
+            m.category_path ? /* @__PURE__ */ jsxDEV("span", { style: { fontSize: 12 }, children: m.category_path.replace(/>/g, " › ") }, void 0, false, {
+              fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+              lineNumber: 192,
+              columnNumber: 17
+            }, this) : /* @__PURE__ */ jsxDEV("span", { className: "text-dim", children: "—" }, void 0, false, {
+              fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+              lineNumber: 193,
+              columnNumber: 17
+            }, this),
+            /* @__PURE__ */ jsxDEV("div", { style: { marginTop: 3 }, children: /* @__PURE__ */ jsxDEV("span", { className: `badge badge-atum-${m.status}`, children: m.status }, void 0, false, {
+              fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+              lineNumber: 195,
+              columnNumber: 23
+            }, this) }, void 0, false, {
+              fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+              lineNumber: 194,
+              columnNumber: 21
+            }, this)
+          ] }, void 0, true, {
+            fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+            lineNumber: 190,
+            columnNumber: 19
+          }, this),
+          /* @__PURE__ */ jsxDEV("td", { children: /* @__PURE__ */ jsxDEV("span", { className: `badge ${confClass(m.confidence)}`, children: [
+            Math.round(m.confidence * 100),
+            "%"
+          ] }, void 0, true, {
+            fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+            lineNumber: 199,
+            columnNumber: 21
+          }, this) }, void 0, false, {
+            fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+            lineNumber: 198,
+            columnNumber: 19
+          }, this),
+          /* @__PURE__ */ jsxDEV("td", { style: { minWidth: 160 }, children: [
+            /* @__PURE__ */ jsxDEV("button", { className: "evidence-toggle", onClick: () => toggleRow(m.id), children: [
+              expanded.has(m.id) ? "▾" : "▸",
+              " Evidence"
+            ] }, void 0, true, {
+              fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+              lineNumber: 202,
+              columnNumber: 21
+            }, this),
+            expanded.has(m.id) && /* @__PURE__ */ jsxDEV("div", { className: "evidence-panel", children: [
+              m.evidence?.canonicalEntityName && /* @__PURE__ */ jsxDEV("div", { children: [
+                "Graph entity: ",
+                /* @__PURE__ */ jsxDEV("span", { className: "evidence-entity", children: m.evidence.canonicalEntityName }, void 0, false, {
+                  fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+                  lineNumber: 208,
+                  columnNumber: 38
+                }, this)
+              ] }, void 0, true, {
+                fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+                lineNumber: 208,
+                columnNumber: 19
+              }, this),
+              m.evidence?.rule && /* @__PURE__ */ jsxDEV("div", { children: [
+                "Rule: ",
+                m.evidence.rule
+              ] }, void 0, true, {
+                fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+                lineNumber: 210,
+                columnNumber: 46
+              }, this),
+              m.evidence?.vectorSimilarity != null && /* @__PURE__ */ jsxDEV("div", { children: [
+                "Vector similarity: ",
+                Math.round(m.evidence.vectorSimilarity * 100),
+                "%"
+              ] }, void 0, true, {
+                fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+                lineNumber: 211,
+                columnNumber: 66
+              }, this),
+              m.evidence?.lexicalScore != null && /* @__PURE__ */ jsxDEV("div", { children: [
+                "Keyword score: ",
+                Math.round(m.evidence.lexicalScore * 100),
+                "%"
+              ] }, void 0, true, {
+                fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+                lineNumber: 212,
+                columnNumber: 62
+              }, this),
+              m.source_context && Object.keys(m.source_context).length > 0 && /* @__PURE__ */ jsxDEV("div", { style: { marginTop: 4, paddingTop: 4, borderTop: "1px solid var(--border-soft)" }, children: Object.entries(m.source_context).slice(0, 3).map(
+                ([k, v]) => /* @__PURE__ */ jsxDEV("div", { children: [
+                  /* @__PURE__ */ jsxDEV("span", { className: "text-dim", children: [
+                    k,
+                    ":"
+                  ] }, void 0, true, {
+                    fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+                    lineNumber: 216,
+                    columnNumber: 34
+                  }, this),
+                  " ",
+                  String(v)
+                ] }, k, true, {
+                  fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+                  lineNumber: 216,
+                  columnNumber: 21
+                }, this)
+              ) }, void 0, false, {
+                fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+                lineNumber: 214,
+                columnNumber: 19
+              }, this)
+            ] }, void 0, true, {
+              fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+              lineNumber: 206,
+              columnNumber: 17
+            }, this)
+          ] }, void 0, true, {
+            fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+            lineNumber: 201,
+            columnNumber: 19
+          }, this),
+          /* @__PURE__ */ jsxDEV("td", { style: { minWidth: 160 }, children: (m.status === "suggested" || m.status === "unresolved") && /* @__PURE__ */ jsxDEV("div", { style: { display: "flex", flexDirection: "column", gap: 4 }, children: [
+            /* @__PURE__ */ jsxDEV("div", { style: { display: "flex", gap: 4 }, children: [
+              /* @__PURE__ */ jsxDEV("button", { className: "btn btn-approve btn-sm", onClick: () => exec(() => reviewAtumMapping(m.id, "approve"), "Approved."), children: "Approve" }, void 0, false, {
+                fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+                lineNumber: 227,
+                columnNumber: 27
+              }, this),
+              /* @__PURE__ */ jsxDEV("button", { className: "btn btn-reject  btn-sm", onClick: () => exec(() => reviewAtumMapping(m.id, "reject"), "Rejected."), children: "Reject" }, void 0, false, {
+                fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+                lineNumber: 228,
+                columnNumber: 27
+              }, this)
+            ] }, void 0, true, {
+              fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+              lineNumber: 226,
+              columnNumber: 25
+            }, this),
+            /* @__PURE__ */ jsxDEV(
+              "select",
+              {
+                className: "override-select",
+                defaultValue: "",
+                onChange: (e) => {
+                  if (e.target.value) exec(() => reviewAtumMapping(m.id, "approve", e.target.value), "Overridden.");
+                },
+                children: [
+                  /* @__PURE__ */ jsxDEV("option", { value: "", children: "Override…" }, void 0, false, {
+                    fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+                    lineNumber: 235,
+                    columnNumber: 27
+                  }, this),
+                  taxonomy.slice(0, 60).map(
+                    (t) => /* @__PURE__ */ jsxDEV("option", { value: t.id, children: t.path }, t.id, false, {
+                      fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+                      lineNumber: 237,
+                      columnNumber: 21
+                    }, this)
+                  )
+                ]
+              },
+              void 0,
+              true,
+              {
+                fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+                lineNumber: 230,
+                columnNumber: 25
+              },
+              this
+            )
+          ] }, void 0, true, {
+            fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+            lineNumber: 225,
+            columnNumber: 17
+          }, this) }, void 0, false, {
+            fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+            lineNumber: 223,
+            columnNumber: 19
+          }, this)
+        ] }, m.id, true, {
+          fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+          lineNumber: 184,
+          columnNumber: 13
+        }, this)
+      ) }, void 0, false, {
+        fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+        lineNumber: 182,
+        columnNumber: 13
+      }, this)
+    ] }, void 0, true, {
+      fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+      lineNumber: 171,
+      columnNumber: 9
+    }, this) }, void 0, false, {
+      fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+      lineNumber: 156,
+      columnNumber: 7
+    }, this)
+  ] }, void 0, true, {
+    fileName: "C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx",
+    lineNumber: 79,
+    columnNumber: 5
+  }, this);
+}
+_s(AtumPhase, "0QjOhIv7Zo7ar0kl/KsjSr5Svpc=");
+_c = AtumPhase;
+var _c;
+$RefreshReg$(_c, "AtumPhase");
+if (import.meta.hot && !inWebWorker) {
+  window.$RefreshReg$ = prevRefreshReg;
+  window.$RefreshSig$ = prevRefreshSig;
+}
+if (import.meta.hot && !inWebWorker) {
+  RefreshRuntime.__hmr_import(import.meta.url).then((currentExports) => {
+    RefreshRuntime.registerExportsForReactRefresh("C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx", currentExports);
+    import.meta.hot.accept((nextExports) => {
+      if (!nextExports) return;
+      const invalidateMessage = RefreshRuntime.validateRefreshBoundaryAndEnqueueUpdate("C:/Internal Project/office-hackathon-2026/TBM-hack/apps/web/src/components/pipeline/AtumPhase.tsx", currentExports, nextExports);
+      if (invalidateMessage) import.meta.hot.invalidate(invalidateMessage);
+    });
+  });
+}
+
+//# sourceMappingURL=data:application/json;base64,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O0FBQUEsYUFBQUEsSUFBQSIsIm5hbWVzIjpbInVzZU1lbW8iLCJ1c2VTdGF0ZSIsInVzZUVmZmVjdCIsImZldGNoQXR1bU1hcHBpbmdzIiwiZmV0Y2hBdHVtUmVwb3J0IiwiZmV0Y2hBdHVtVGF4b25vbXkiLCJpbXBvcnRBdHVtVGF4b25vbXkiLCJyZXZpZXdBdHVtTWFwcGluZyIsInJ1bkF0dW1NYXBwaW5nIiwic3luY0F0dW1HcmFwaCIsIkF0dW1QaGFzZSIsIl9zIiwibGF5ZXIiLCJzZXRMYXllciIsIm1hcHBpbmdzIiwic2V0TWFwcGluZ3MiLCJ0YXhvbm9teSIsInNldFRheG9ub215IiwicmVwb3J0Iiwic2V0UmVwb3J0Iiwic3RhdHVzRmlsdGVyIiwic2V0U3RhdHVzRmlsdGVyIiwidXNlTGxtIiwic2V0VXNlTGxtIiwiYnVzeSIsInNldEJ1c3kiLCJtZXNzYWdlIiwic2V0TWVzc2FnZSIsInJ1bkRldGFpbHMiLCJzZXRSdW5EZXRhaWxzIiwiZXJyb3IiLCJzZXRFcnJvciIsImV4cGFuZGVkIiwic2V0RXhwYW5kZWQiLCJTZXQiLCJyZWZyZXNoIiwibCIsIm0iLCJ0IiwiciIsIlByb21pc2UiLCJhbGwiLCJmaW5hbGx5IiwiZXhlYyIsImZuIiwib2siLCJlIiwiRXJyb3IiLCJjaGFuZ2VMYXllciIsIm5leHQiLCJ0b2dnbGVSb3ciLCJpZCIsInAiLCJuIiwiaGFzIiwiZGVsZXRlIiwiYWRkIiwidmlzaWJsZSIsImZpbHRlciIsInN0YXR1cyIsImNvbmZDbGFzcyIsImMiLCJtYXJnaW4iLCJ0b3RhbCIsIk1hdGgiLCJyb3VuZCIsImNvdmVyYWdlIiwiYXZlcmFnZUNvbmZpZGVuY2UiLCJieVN0YXR1cyIsImRpc3BsYXkiLCJnYXAiLCJtYXJnaW5MZWZ0IiwiZmxleFdyYXAiLCJBTExfTEFZRVJTIiwidG90YWxNYXBwZWQiLCJ0b3RhbENhbmRpZGF0ZXMiLCJzdGF0cyIsIm1hcHBlZCIsImNhbmRpZGF0ZXMiLCJsZW5ndGgiLCJ0b3RhbEVkZ2VzIiwidG90YWxDYXRlZ29yaWVzIiwiZWRnZXMiLCJjYXRlZ29yaWVzIiwibWFwIiwibGFiZWwiLCJhbGlnbkl0ZW1zIiwicGFkZGluZ1JpZ2h0IiwidGFyZ2V0IiwiY2hlY2tlZCIsInZhbHVlIiwiZm9udFNpemUiLCJmbGV4Iiwib3ZlcmZsb3ciLCJ0ZXh0QWxpZ24iLCJyZXBsYWNlIiwiZm9udFdlaWdodCIsInNvdXJjZV92YWx1ZSIsImRhdGFzZXRfZmlsZV9uYW1lIiwic2VtYW50aWNfcm9sZSIsIm1hcmdpblRvcCIsImNhdGVnb3J5X3BhdGgiLCJjb25maWRlbmNlIiwibWluV2lkdGgiLCJldmlkZW5jZSIsImNhbm9uaWNhbEVudGl0eU5hbWUiLCJydWxlIiwidmVjdG9yU2ltaWxhcml0eSIsImxleGljYWxTY29yZSIsInNvdXJjZV9jb250ZXh0IiwiT2JqZWN0Iiwia2V5cyIsInBhZGRpbmdUb3AiLCJib3JkZXJUb3AiLCJlbnRyaWVzIiwic2xpY2UiLCJrIiwidiIsIlN0cmluZyIsImZsZXhEaXJlY3Rpb24iLCJwYXRoIiwiX2MiXSwiaWdub3JlTGlzdCI6W10sInNvdXJjZXMiOlsiQXR1bVBoYXNlLnRzeCJdLCJzb3VyY2VzQ29udGVudCI6WyJpbXBvcnQgeyB1c2VNZW1vLCB1c2VTdGF0ZSwgdXNlRWZmZWN0IH0gZnJvbSBcInJlYWN0XCI7XHJcbmltcG9ydCB7XHJcbiAgQXR1bUxheWVyLCBBdHVtTWFwcGluZywgQXR1bVJlcG9ydCwgQXR1bVRheG9ub215SXRlbSxcclxuICBmZXRjaEF0dW1NYXBwaW5ncywgZmV0Y2hBdHVtUmVwb3J0LCBmZXRjaEF0dW1UYXhvbm9teSxcclxuICBpbXBvcnRBdHVtVGF4b25vbXksIHJldmlld0F0dW1NYXBwaW5nLCBydW5BdHVtTWFwcGluZywgc3luY0F0dW1HcmFwaCxcclxufSBmcm9tIFwiLi4vLi4vYXBpXCI7XHJcblxyXG5leHBvcnQgZnVuY3Rpb24gQXR1bVBoYXNlKCkge1xyXG4gIGNvbnN0IFtsYXllciwgICAgICAgc2V0TGF5ZXJdICAgICAgID0gdXNlU3RhdGU8QXR1bUxheWVyPihcInJlc291cmNlX3Rvd2VyXCIpO1xyXG4gIGNvbnN0IFttYXBwaW5ncywgICAgc2V0TWFwcGluZ3NdICAgID0gdXNlU3RhdGU8QXR1bU1hcHBpbmdbXT4oW10pO1xyXG4gIGNvbnN0IFt0YXhvbm9teSwgICAgc2V0VGF4b25vbXldICAgID0gdXNlU3RhdGU8QXR1bVRheG9ub215SXRlbVtdPihbXSk7XHJcbiAgY29uc3QgW3JlcG9ydCwgICAgICBzZXRSZXBvcnRdICAgICAgPSB1c2VTdGF0ZTxBdHVtUmVwb3J0IHwgbnVsbD4obnVsbCk7XHJcbiAgY29uc3QgW3N0YXR1c0ZpbHRlcixzZXRTdGF0dXNGaWx0ZXJdPSB1c2VTdGF0ZShcImFsbFwiKTtcclxuICBjb25zdCBbdXNlTGxtLCAgICAgIHNldFVzZUxsbV0gICAgICA9IHVzZVN0YXRlKGZhbHNlKTtcclxuICBjb25zdCBbYnVzeSwgICAgICAgIHNldEJ1c3ldICAgICAgICA9IHVzZVN0YXRlKGZhbHNlKTtcclxuICBjb25zdCBbbWVzc2FnZSwgICAgIHNldE1lc3NhZ2VdICAgICA9IHVzZVN0YXRlKFwiXCIpO1xyXG4gIGNvbnN0IFtydW5EZXRhaWxzLCAgc2V0UnVuRGV0YWlsc10gID0gdXNlU3RhdGUoXCJcIik7XHJcbiAgY29uc3QgW2Vycm9yLCAgICAgICBzZXRFcnJvcl0gICAgICAgPSB1c2VTdGF0ZShcIlwiKTtcclxuICBjb25zdCBbZXhwYW5kZWQsICAgIHNldEV4cGFuZGVkXSAgICA9IHVzZVN0YXRlPFNldDxzdHJpbmc+PihuZXcgU2V0KCkpO1xyXG5cclxuICBhc3luYyBmdW5jdGlvbiByZWZyZXNoKGwgPSBsYXllcikge1xyXG4gICAgY29uc3QgW20sIHQsIHJdID0gYXdhaXQgUHJvbWlzZS5hbGwoW2ZldGNoQXR1bU1hcHBpbmdzKGwpLCBmZXRjaEF0dW1UYXhvbm9teShsKSwgZmV0Y2hBdHVtUmVwb3J0KCldKTtcclxuICAgIHNldE1hcHBpbmdzKG0pOyBzZXRUYXhvbm9teSh0KTsgc2V0UmVwb3J0KHIpO1xyXG4gIH1cclxuXHJcbiAgLy8gQXV0by1sb2FkIG9uIG1vdW50IHNvIGRhdGEgZnJvbSBwcmV2aW91cyBydW5zIHNob3dzIGltbWVkaWF0ZWx5XHJcbiAgdXNlRWZmZWN0KCgpID0+IHtcclxuICAgIHNldEJ1c3kodHJ1ZSk7XHJcbiAgICByZWZyZXNoKCkuZmluYWxseSgoKSA9PiBzZXRCdXN5KGZhbHNlKSk7XHJcbiAgfSwgW10pOyAvLyBlc2xpbnQtZGlzYWJsZS1saW5lIHJlYWN0LWhvb2tzL2V4aGF1c3RpdmUtZGVwc1xyXG5cclxuICBhc3luYyBmdW5jdGlvbiBleGVjKGZuOiAoKSA9PiBQcm9taXNlPHVua25vd24+LCBvazogc3RyaW5nKSB7XHJcbiAgICBzZXRCdXN5KHRydWUpOyBzZXRFcnJvcihcIlwiKTsgc2V0TWVzc2FnZShcIlwiKTtcclxuICAgIHRyeSB7IGF3YWl0IGZuKCk7IGF3YWl0IHJlZnJlc2goKTsgc2V0TWVzc2FnZShvayk7IH1cclxuICAgIGNhdGNoIChlKSB7IHNldEVycm9yKGUgaW5zdGFuY2VvZiBFcnJvciA/IGUubWVzc2FnZSA6IFwiT3BlcmF0aW9uIGZhaWxlZFwiKTsgfVxyXG4gICAgZmluYWxseSB7IHNldEJ1c3koZmFsc2UpOyB9XHJcbiAgfVxyXG5cclxuICBhc3luYyBmdW5jdGlvbiBjaGFuZ2VMYXllcihuZXh0OiBBdHVtTGF5ZXIpIHtcclxuICAgIHNldExheWVyKG5leHQpOyBzZXRCdXN5KHRydWUpOyBzZXRFcnJvcihcIlwiKTtcclxuICAgIHRyeSB7IGF3YWl0IHJlZnJlc2gobmV4dCk7IH1cclxuICAgIGNhdGNoIChlKSB7IHNldEVycm9yKGUgaW5zdGFuY2VvZiBFcnJvciA/IGUubWVzc2FnZSA6IFwiRmFpbGVkIHRvIGxvYWRcIik7IH1cclxuICAgIGZpbmFsbHkgeyBzZXRCdXN5KGZhbHNlKTsgfVxyXG4gIH1cclxuXHJcbiAgZnVuY3Rpb24gdG9nZ2xlUm93KGlkOiBzdHJpbmcpIHtcclxuICAgIHNldEV4cGFuZGVkKHAgPT4geyBjb25zdCBuID0gbmV3IFNldChwKTsgbi5oYXMoaWQpID8gbi5kZWxldGUoaWQpIDogbi5hZGQoaWQpOyByZXR1cm4gbjsgfSk7XHJcbiAgfVxyXG5cclxuICBjb25zdCB2aXNpYmxlID0gdXNlTWVtbyhcclxuICAgICgpID0+IHN0YXR1c0ZpbHRlciA9PT0gXCJhbGxcIiA/IG1hcHBpbmdzIDogbWFwcGluZ3MuZmlsdGVyKG0gPT4gbS5zdGF0dXMgPT09IHN0YXR1c0ZpbHRlciksXHJcbiAgICBbbWFwcGluZ3MsIHN0YXR1c0ZpbHRlcl1cclxuICApO1xyXG5cclxuICBmdW5jdGlvbiBjb25mQ2xhc3MoYzogbnVtYmVyKSB7XHJcbiAgICByZXR1cm4gYyA+PSAwLjggPyBcImJhZGdlLWNvbmZpZGVuY2UtaGlnaFwiIDogYyA+PSAwLjYgPyBcImJhZGdlLWNvbmZpZGVuY2UtbWVkaXVtXCIgOiBcImJhZGdlLWNvbmZpZGVuY2UtbG93XCI7XHJcbiAgfVxyXG5cclxuICByZXR1cm4gKFxyXG4gICAgPGRpdiBjbGFzc05hbWU9XCJwaGFzZS1wYW5lbCBjb2x1bW5cIj5cclxuICAgICAgey8qIFRvcCBiYXIgKi99XHJcbiAgICAgIDxkaXYgY2xhc3NOYW1lPVwicGhhc2UtaGVhZGVyXCI+XHJcbiAgICAgICAgPGRpdj5cclxuICAgICAgICAgIDxwIGNsYXNzTmFtZT1cInBoYXNlLXN1YnRpdGxlXCI+UGhhc2UgMzwvcD5cclxuICAgICAgICAgIDxoMiBjbGFzc05hbWU9XCJwaGFzZS10aXRsZVwiPkFUVU0gTWFwcGluZzwvaDI+XHJcbiAgICAgICAgPC9kaXY+XHJcbiAgICAgICAge3JlcG9ydCAmJiAoXHJcbiAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT1cInN0YXQtY2hpcHNcIiBzdHlsZT17eyBtYXJnaW46IFwiMCA4cHhcIiB9fT5cclxuICAgICAgICAgICAgPGRpdiBjbGFzc05hbWU9XCJzdGF0LWNoaXAgYWNjZW50XCI+IDxkaXYgY2xhc3NOYW1lPVwic3RhdC1jaGlwLXZhbHVlXCI+e3JlcG9ydC50b3RhbH08L2Rpdj4gICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPVwic3RhdC1jaGlwLWxhYmVsXCI+Q2FuZGlkYXRlczwvZGl2PjwvZGl2PlxyXG4gICAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT1cInN0YXQtY2hpcCBzdWNjZXNzXCI+PGRpdiBjbGFzc05hbWU9XCJzdGF0LWNoaXAtdmFsdWVcIj57TWF0aC5yb3VuZChyZXBvcnQuY292ZXJhZ2UgKiAxMDApfSU8L2Rpdj4gICAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT1cInN0YXQtY2hpcC1sYWJlbFwiPkNvdmVyYWdlPC9kaXY+PC9kaXY+XHJcbiAgICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPVwic3RhdC1jaGlwXCI+ICAgICAgICA8ZGl2IGNsYXNzTmFtZT1cInN0YXQtY2hpcC12YWx1ZVwiPntNYXRoLnJvdW5kKHJlcG9ydC5hdmVyYWdlQ29uZmlkZW5jZSAqIDEwMCl9JTwvZGl2PiAgIDxkaXYgY2xhc3NOYW1lPVwic3RhdC1jaGlwLWxhYmVsXCI+QXZnIENvbmZpZGVuY2U8L2Rpdj48L2Rpdj5cclxuICAgICAgICAgICAgPGRpdiBjbGFzc05hbWU9XCJzdGF0LWNoaXAgd2FybmluZ1wiPjxkaXYgY2xhc3NOYW1lPVwic3RhdC1jaGlwLXZhbHVlXCI+e3JlcG9ydC5ieVN0YXR1cz8uW1wic3VnZ2VzdGVkXCJdID8/IDB9PC9kaXY+ICAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT1cInN0YXQtY2hpcC1sYWJlbFwiPk5lZWQgUmV2aWV3PC9kaXY+PC9kaXY+XHJcbiAgICAgICAgICA8L2Rpdj5cclxuICAgICAgICApfVxyXG4gICAgICAgIDxkaXYgc3R5bGU9e3sgZGlzcGxheTogXCJmbGV4XCIsIGdhcDogNiwgbWFyZ2luTGVmdDogXCJhdXRvXCIsIGZsZXhXcmFwOiBcIndyYXBcIiB9fT5cclxuICAgICAgICAgIDxidXR0b24gY2xhc3NOYW1lPVwiYnRuIGJ0bi1zZWNvbmRhcnkgYnRuLXNtXCIgZGlzYWJsZWQ9e2J1c3l9IG9uQ2xpY2s9eygpID0+IGV4ZWMoaW1wb3J0QXR1bVRheG9ub215LCBcIlRheG9ub215IGltcG9ydGVkLlwiKX0+SW1wb3J0IFRheG9ub215PC9idXR0b24+XHJcbiAgICAgICAgICA8YnV0dG9uIGNsYXNzTmFtZT1cImJ0biBidG4tcHJpbWFyeSAgIGJ0bi1zbVwiIGRpc2FibGVkPXtidXN5fVxyXG4gICAgICAgICAgICBvbkNsaWNrPXsoKSA9PiBleGVjKGFzeW5jICgpID0+IHtcclxuICAgICAgICAgICAgICBjb25zdCBBTExfTEFZRVJTOiBBdHVtTGF5ZXJbXSA9IFtcInJlc291cmNlX3Rvd2VyXCIsIFwiY29zdF9wb29sXCIsIFwic29sdXRpb25cIl07XHJcbiAgICAgICAgICAgICAgbGV0IHRvdGFsTWFwcGVkID0gMCwgdG90YWxDYW5kaWRhdGVzID0gMDtcclxuICAgICAgICAgICAgICBmb3IgKGNvbnN0IGwgb2YgQUxMX0xBWUVSUykge1xyXG4gICAgICAgICAgICAgICAgY29uc3QgeyBzdGF0cyB9ID0gYXdhaXQgcnVuQXR1bU1hcHBpbmcobCwgdXNlTGxtKTtcclxuICAgICAgICAgICAgICAgIHRvdGFsTWFwcGVkICAgICArPSBzdGF0cy5tYXBwZWQ7XHJcbiAgICAgICAgICAgICAgICB0b3RhbENhbmRpZGF0ZXMgKz0gc3RhdHMuY2FuZGlkYXRlcztcclxuICAgICAgICAgICAgICB9XHJcbiAgICAgICAgICAgICAgc2V0UnVuRGV0YWlscyhgTWFwcGVkICR7dG90YWxNYXBwZWR9LyR7dG90YWxDYW5kaWRhdGVzfSBhY3Jvc3MgYWxsIDMgbGF5ZXJzLmApO1xyXG4gICAgICAgICAgICAgIGF3YWl0IHJlZnJlc2gobGF5ZXIpO1xyXG4gICAgICAgICAgICB9LCBcIk1hcHBpbmcgY29tcGxldGUuXCIpfT5cclxuICAgICAgICAgICAge2J1c3kgPyA8PjxzcGFuIGNsYXNzTmFtZT1cInNwaW5uZXJcIiAvPiBSdW5uaW5n4oCmPC8+IDogbWFwcGluZ3MubGVuZ3RoID4gMCA/IFwiUnVuIEFnYWluXCIgOiBcIlJ1biBNYXBwaW5nXCJ9XHJcbiAgICAgICAgICA8L2J1dHRvbj5cclxuICAgICAgICAgIDxidXR0b24gY2xhc3NOYW1lPVwiYnRuIGJ0bi1zZWNvbmRhcnkgYnRuLXNtXCIgZGlzYWJsZWQ9e2J1c3l9XHJcbiAgICAgICAgICAgIG9uQ2xpY2s9eygpID0+IGV4ZWMoYXN5bmMgKCkgPT4ge1xyXG4gICAgICAgICAgICAgIGNvbnN0IEFMTF9MQVlFUlM6IEF0dW1MYXllcltdID0gW1wicmVzb3VyY2VfdG93ZXJcIiwgXCJjb3N0X3Bvb2xcIiwgXCJzb2x1dGlvblwiXTtcclxuICAgICAgICAgICAgICBsZXQgdG90YWxFZGdlcyA9IDAsIHRvdGFsQ2F0ZWdvcmllcyA9IDA7XHJcbiAgICAgICAgICAgICAgZm9yIChjb25zdCBsIG9mIEFMTF9MQVlFUlMpIHtcclxuICAgICAgICAgICAgICAgIGNvbnN0IHIgPSBhd2FpdCBzeW5jQXR1bUdyYXBoKGwpO1xyXG4gICAgICAgICAgICAgICAgdG90YWxFZGdlcyAgICAgKz0gci5lZGdlcztcclxuICAgICAgICAgICAgICAgIHRvdGFsQ2F0ZWdvcmllcys9IHIuY2F0ZWdvcmllcztcclxuICAgICAgICAgICAgICB9XHJcbiAgICAgICAgICAgICAgc2V0UnVuRGV0YWlscyhgJHt0b3RhbEVkZ2VzfSBBVFVNIGVkZ2VzIHdyaXR0ZW4gYWNyb3NzICR7dG90YWxDYXRlZ29yaWVzfSBjYXRlZ29yaWVzIChhbGwgMyBsYXllcnMpIOKAlCBnbyB0byB0aGUgUmVsYXRpb25zaGlwcyBwaGFzZSB0byBleHBsb3JlIHVwZGF0ZWQgY29ubmVjdGlvbnMuYCk7XHJcbiAgICAgICAgICAgIH0sIFwiR3JhcGggc3luY2VkLlwiKX0+XHJcbiAgICAgICAgICAgIFN5bmMgdG8gR3JhcGhcclxuICAgICAgICAgIDwvYnV0dG9uPlxyXG4gICAgICAgICAgPGJ1dHRvbiBjbGFzc05hbWU9XCJidG4gYnRuLWdob3N0IGJ0bi1zbVwiIGRpc2FibGVkPXtidXN5fSBvbkNsaWNrPXsoKSA9PiBleGVjKCgpID0+IHJlZnJlc2goKSwgXCJSZWZyZXNoZWQuXCIpfT5SZWZyZXNoPC9idXR0b24+XHJcbiAgICAgICAgPC9kaXY+XHJcbiAgICAgIDwvZGl2PlxyXG5cclxuICAgICAgey8qIExheWVyIHRhYnMgKyBmaWx0ZXJzICovfVxyXG4gICAgICA8ZGl2IGNsYXNzTmFtZT1cImRxLXRhYnNcIiBzdHlsZT17eyBnYXA6IDAgfX0+XHJcbiAgICAgICAgeyhbW1wicmVzb3VyY2VfdG93ZXJcIiwgXCJSZXNvdXJjZSBUb3dlcnNcIl0sIFtcImNvc3RfcG9vbFwiLCBcIkNvc3QgUG9vbHNcIl0sIFtcInNvbHV0aW9uXCIsIFwiVGVjaG5vbG9neSBTb2x1dGlvbnNcIl1dIGFzIFtBdHVtTGF5ZXIsIHN0cmluZ11bXSkubWFwKChbbCwgbGFiZWxdKSA9PiAoXHJcbiAgICAgICAgICA8YnV0dG9uIGtleT17bH0gY2xhc3NOYW1lPXtgZHEtdGFiICR7bGF5ZXIgPT09IGwgPyBcImFjdGl2ZVwiIDogXCJcIn1gfSBvbkNsaWNrPXsoKSA9PiBjaGFuZ2VMYXllcihsKX0+e2xhYmVsfTwvYnV0dG9uPlxyXG4gICAgICAgICkpfVxyXG4gICAgICAgIDxkaXYgc3R5bGU9e3sgbWFyZ2luTGVmdDogXCJhdXRvXCIsIGRpc3BsYXk6IFwiZmxleFwiLCBhbGlnbkl0ZW1zOiBcImNlbnRlclwiLCBnYXA6IDgsIHBhZGRpbmdSaWdodDogNCB9fT5cclxuICAgICAgICAgIDxsYWJlbCBjbGFzc05hbWU9XCJ0b2dnbGVcIj5cclxuICAgICAgICAgICAgPGlucHV0IHR5cGU9XCJjaGVja2JveFwiIGNoZWNrZWQ9e3VzZUxsbX0gb25DaGFuZ2U9e2UgPT4gc2V0VXNlTGxtKGUudGFyZ2V0LmNoZWNrZWQpfSAvPlxyXG4gICAgICAgICAgICBBSSByZWZpbmVtZW50XHJcbiAgICAgICAgICA8L2xhYmVsPlxyXG4gICAgICAgICAgPHNlbGVjdCBjbGFzc05hbWU9XCJhdGhlbmEtc2VsZWN0XCIgdmFsdWU9e3N0YXR1c0ZpbHRlcn0gb25DaGFuZ2U9e2UgPT4gc2V0U3RhdHVzRmlsdGVyKGUudGFyZ2V0LnZhbHVlKX0+XHJcbiAgICAgICAgICAgIDxvcHRpb24gdmFsdWU9XCJhbGxcIj5BbGwgc3RhdHVzZXM8L29wdGlvbj5cclxuICAgICAgICAgICAgPG9wdGlvbiB2YWx1ZT1cInN1Z2dlc3RlZFwiPk5lZWRzIHJldmlldzwvb3B0aW9uPlxyXG4gICAgICAgICAgICA8b3B0aW9uIHZhbHVlPVwiYXBwcm92ZWRcIj5BcHByb3ZlZDwvb3B0aW9uPlxyXG4gICAgICAgICAgICA8b3B0aW9uIHZhbHVlPVwib3ZlcnJpZGRlblwiPk92ZXJyaWRkZW48L29wdGlvbj5cclxuICAgICAgICAgICAgPG9wdGlvbiB2YWx1ZT1cInVucmVzb2x2ZWRcIj5VbnJlc29sdmVkPC9vcHRpb24+XHJcbiAgICAgICAgICAgIDxvcHRpb24gdmFsdWU9XCJyZWplY3RlZFwiPlJlamVjdGVkPC9vcHRpb24+XHJcbiAgICAgICAgICA8L3NlbGVjdD5cclxuICAgICAgICA8L2Rpdj5cclxuICAgICAgPC9kaXY+XHJcblxyXG4gICAgICB7bWVzc2FnZSAmJiAoXHJcbiAgICAgICAgPGRpdiBjbGFzc05hbWU9XCJzdWNjZXNzLWJhclwiIHN0eWxlPXt7IG1hcmdpbjogXCIwIDIycHhcIiB9fT5cclxuICAgICAgICAgIHttZXNzYWdlfXtydW5EZXRhaWxzICYmIDxzcGFuIGNsYXNzTmFtZT1cInRleHQtbXV0ZWQgbm9ybWFsLWNhc2VcIiBzdHlsZT17eyBmb250U2l6ZTogMTEgfX0+IOKAlCB7cnVuRGV0YWlsc308L3NwYW4+fVxyXG4gICAgICAgIDwvZGl2PlxyXG4gICAgICApfVxyXG4gICAgICB7ZXJyb3IgJiYgPGRpdiBjbGFzc05hbWU9XCJlcnJvci1iYXJcIiBzdHlsZT17eyBtYXJnaW46IFwiMCAyMnB4XCIgfX0+e2Vycm9yfTwvZGl2Pn1cclxuXHJcbiAgICAgIHsvKiBNYXBwaW5ncyB0YWJsZSAqL31cclxuICAgICAgPGRpdiBzdHlsZT17eyBmbGV4OiAxLCBvdmVyZmxvdzogXCJhdXRvXCIgfX0+XHJcbiAgICAgICAge3Zpc2libGUubGVuZ3RoID09PSAwID8gKFxyXG4gICAgICAgICAgPGRpdiBjbGFzc05hbWU9XCJlbXB0eS1zdGF0ZVwiPlxyXG4gICAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT1cImVtcHR5LWljb25cIj7wn5eCPC9kaXY+XHJcbiAgICAgICAgICAgIDxkaXYgc3R5bGU9e3sgdGV4dEFsaWduOiBcImNlbnRlclwiIH19PlxyXG4gICAgICAgICAgICAgIHtidXN5XHJcbiAgICAgICAgICAgICAgICA/IFwiTG9hZGluZ+KAplwiXHJcbiAgICAgICAgICAgICAgICA6IG1hcHBpbmdzLmxlbmd0aCA9PT0gMCAmJiAocmVwb3J0Py50b3RhbCA/PyAwKSA9PT0gMFxyXG4gICAgICAgICAgICAgICAgPyBcIkltcG9ydCB0YXhvbm9teSB0aGVuIGNsaWNrIFJ1biBNYXBwaW5nIHRvIGdlbmVyYXRlIEFUVU0gY2xhc3NpZmljYXRpb25zXCJcclxuICAgICAgICAgICAgICAgIDogbWFwcGluZ3MubGVuZ3RoID09PSAwXHJcbiAgICAgICAgICAgICAgICA/IGBObyBtYXBwaW5ncyBmb3IgdGhpcyBsYXllciB5ZXQg4oCUIGNsaWNrIOKAnFJ1biBNYXBwaW5n4oCdIHRvIGNsYXNzaWZ5ICR7bGF5ZXIucmVwbGFjZSgvXy9nLCBcIiBcIil9c2BcclxuICAgICAgICAgICAgICAgIDogXCJObyBtYXBwaW5ncyBtYXRjaCB0aGUgY3VycmVudCBmaWx0ZXJcIn1cclxuICAgICAgICAgICAgPC9kaXY+XHJcbiAgICAgICAgICA8L2Rpdj5cclxuICAgICAgICApIDogKFxyXG4gICAgICAgICAgPHRhYmxlIGNsYXNzTmFtZT1cImF0aGVuYS10YWJsZVwiPlxyXG4gICAgICAgICAgICA8dGhlYWQ+XHJcbiAgICAgICAgICAgICAgPHRyPlxyXG4gICAgICAgICAgICAgICAgPHRoPlNvdXJjZSBWYWx1ZTwvdGg+XHJcbiAgICAgICAgICAgICAgICA8dGg+RGF0YXNldCAvIFJvbGU8L3RoPlxyXG4gICAgICAgICAgICAgICAgPHRoPkFUVU0gQ2xhc3NpZmljYXRpb248L3RoPlxyXG4gICAgICAgICAgICAgICAgPHRoPkNvbmZpZGVuY2U8L3RoPlxyXG4gICAgICAgICAgICAgICAgPHRoPkV2aWRlbmNlPC90aD5cclxuICAgICAgICAgICAgICAgIDx0aD5SZXZpZXc8L3RoPlxyXG4gICAgICAgICAgICAgIDwvdHI+XHJcbiAgICAgICAgICAgIDwvdGhlYWQ+XHJcbiAgICAgICAgICAgIDx0Ym9keT5cclxuICAgICAgICAgICAgICB7dmlzaWJsZS5tYXAobSA9PiAoXHJcbiAgICAgICAgICAgICAgICA8dHIga2V5PXttLmlkfT5cclxuICAgICAgICAgICAgICAgICAgPHRkIHN0eWxlPXt7IGZvbnRXZWlnaHQ6IDYwMCB9fT57bS5zb3VyY2VfdmFsdWV9PC90ZD5cclxuICAgICAgICAgICAgICAgICAgPHRkIHN0eWxlPXt7IGZvbnRTaXplOiAxMSB9fT5cclxuICAgICAgICAgICAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT1cInRleHQtbXV0ZWRcIj57bS5kYXRhc2V0X2ZpbGVfbmFtZX08L2Rpdj5cclxuICAgICAgICAgICAgICAgICAgICB7bS5zZW1hbnRpY19yb2xlICYmIDxzcGFuIGNsYXNzTmFtZT1cInNvdXJjZS1iYWRnZVwiIHN0eWxlPXt7IGZvbnRTaXplOiBcIjhweFwiLCBtYXJnaW5Ub3A6IDIsIGRpc3BsYXk6IFwiaW5saW5lLWJsb2NrXCIgfX0+e20uc2VtYW50aWNfcm9sZX08L3NwYW4+fVxyXG4gICAgICAgICAgICAgICAgICA8L3RkPlxyXG4gICAgICAgICAgICAgICAgICA8dGQ+XHJcbiAgICAgICAgICAgICAgICAgICAge20uY2F0ZWdvcnlfcGF0aFxyXG4gICAgICAgICAgICAgICAgICAgICAgPyA8c3BhbiBzdHlsZT17eyBmb250U2l6ZTogMTIgfX0+e20uY2F0ZWdvcnlfcGF0aC5yZXBsYWNlKC8+L2csIFwiIOKAuiBcIil9PC9zcGFuPlxyXG4gICAgICAgICAgICAgICAgICAgICAgOiA8c3BhbiBjbGFzc05hbWU9XCJ0ZXh0LWRpbVwiPuKAlDwvc3Bhbj59XHJcbiAgICAgICAgICAgICAgICAgICAgPGRpdiBzdHlsZT17eyBtYXJnaW5Ub3A6IDMgfX0+XHJcbiAgICAgICAgICAgICAgICAgICAgICA8c3BhbiBjbGFzc05hbWU9e2BiYWRnZSBiYWRnZS1hdHVtLSR7bS5zdGF0dXN9YH0+e20uc3RhdHVzfTwvc3Bhbj5cclxuICAgICAgICAgICAgICAgICAgICA8L2Rpdj5cclxuICAgICAgICAgICAgICAgICAgPC90ZD5cclxuICAgICAgICAgICAgICAgICAgPHRkPlxyXG4gICAgICAgICAgICAgICAgICAgIDxzcGFuIGNsYXNzTmFtZT17YGJhZGdlICR7Y29uZkNsYXNzKG0uY29uZmlkZW5jZSl9YH0+e01hdGgucm91bmQobS5jb25maWRlbmNlICogMTAwKX0lPC9zcGFuPlxyXG4gICAgICAgICAgICAgICAgICA8L3RkPlxyXG4gICAgICAgICAgICAgICAgICA8dGQgc3R5bGU9e3sgbWluV2lkdGg6IDE2MCB9fT5cclxuICAgICAgICAgICAgICAgICAgICA8YnV0dG9uIGNsYXNzTmFtZT1cImV2aWRlbmNlLXRvZ2dsZVwiIG9uQ2xpY2s9eygpID0+IHRvZ2dsZVJvdyhtLmlkKX0+XHJcbiAgICAgICAgICAgICAgICAgICAgICB7ZXhwYW5kZWQuaGFzKG0uaWQpID8gXCLilr5cIiA6IFwi4pa4XCJ9IEV2aWRlbmNlXHJcbiAgICAgICAgICAgICAgICAgICAgPC9idXR0b24+XHJcbiAgICAgICAgICAgICAgICAgICAge2V4cGFuZGVkLmhhcyhtLmlkKSAmJiAoXHJcbiAgICAgICAgICAgICAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT1cImV2aWRlbmNlLXBhbmVsXCI+XHJcbiAgICAgICAgICAgICAgICAgICAgICAgIHttLmV2aWRlbmNlPy5jYW5vbmljYWxFbnRpdHlOYW1lICYmIChcclxuICAgICAgICAgICAgICAgICAgICAgICAgICA8ZGl2PkdyYXBoIGVudGl0eTogPHNwYW4gY2xhc3NOYW1lPVwiZXZpZGVuY2UtZW50aXR5XCI+e20uZXZpZGVuY2UuY2Fub25pY2FsRW50aXR5TmFtZX08L3NwYW4+PC9kaXY+XHJcbiAgICAgICAgICAgICAgICAgICAgICAgICl9XHJcbiAgICAgICAgICAgICAgICAgICAgICAgIHttLmV2aWRlbmNlPy5ydWxlICYmIDxkaXY+UnVsZToge20uZXZpZGVuY2UucnVsZX08L2Rpdj59XHJcbiAgICAgICAgICAgICAgICAgICAgICAgIHttLmV2aWRlbmNlPy52ZWN0b3JTaW1pbGFyaXR5ICE9IG51bGwgJiYgPGRpdj5WZWN0b3Igc2ltaWxhcml0eToge01hdGgucm91bmQobS5ldmlkZW5jZS52ZWN0b3JTaW1pbGFyaXR5ICogMTAwKX0lPC9kaXY+fVxyXG4gICAgICAgICAgICAgICAgICAgICAgICB7bS5ldmlkZW5jZT8ubGV4aWNhbFNjb3JlICE9IG51bGwgJiYgPGRpdj5LZXl3b3JkIHNjb3JlOiB7TWF0aC5yb3VuZChtLmV2aWRlbmNlLmxleGljYWxTY29yZSAqIDEwMCl9JTwvZGl2Pn1cclxuICAgICAgICAgICAgICAgICAgICAgICAge20uc291cmNlX2NvbnRleHQgJiYgT2JqZWN0LmtleXMobS5zb3VyY2VfY29udGV4dCkubGVuZ3RoID4gMCAmJiAoXHJcbiAgICAgICAgICAgICAgICAgICAgICAgICAgPGRpdiBzdHlsZT17eyBtYXJnaW5Ub3A6IDQsIHBhZGRpbmdUb3A6IDQsIGJvcmRlclRvcDogXCIxcHggc29saWQgdmFyKC0tYm9yZGVyLXNvZnQpXCIgfX0+XHJcbiAgICAgICAgICAgICAgICAgICAgICAgICAgICB7T2JqZWN0LmVudHJpZXMobS5zb3VyY2VfY29udGV4dCkuc2xpY2UoMCwgMykubWFwKChbaywgdl0pID0+IChcclxuICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgPGRpdiBrZXk9e2t9PjxzcGFuIGNsYXNzTmFtZT1cInRleHQtZGltXCI+e2t9Ojwvc3Bhbj4ge1N0cmluZyh2KX08L2Rpdj5cclxuICAgICAgICAgICAgICAgICAgICAgICAgICAgICkpfVxyXG4gICAgICAgICAgICAgICAgICAgICAgICAgIDwvZGl2PlxyXG4gICAgICAgICAgICAgICAgICAgICAgICApfVxyXG4gICAgICAgICAgICAgICAgICAgICAgPC9kaXY+XHJcbiAgICAgICAgICAgICAgICAgICAgKX1cclxuICAgICAgICAgICAgICAgICAgPC90ZD5cclxuICAgICAgICAgICAgICAgICAgPHRkIHN0eWxlPXt7IG1pbldpZHRoOiAxNjAgfX0+XHJcbiAgICAgICAgICAgICAgICAgICAgeyhtLnN0YXR1cyA9PT0gXCJzdWdnZXN0ZWRcIiB8fCBtLnN0YXR1cyA9PT0gXCJ1bnJlc29sdmVkXCIpICYmIChcclxuICAgICAgICAgICAgICAgICAgICAgIDxkaXYgc3R5bGU9e3sgZGlzcGxheTogXCJmbGV4XCIsIGZsZXhEaXJlY3Rpb246IFwiY29sdW1uXCIsIGdhcDogNCB9fT5cclxuICAgICAgICAgICAgICAgICAgICAgICAgPGRpdiBzdHlsZT17eyBkaXNwbGF5OiBcImZsZXhcIiwgZ2FwOiA0IH19PlxyXG4gICAgICAgICAgICAgICAgICAgICAgICAgIDxidXR0b24gY2xhc3NOYW1lPVwiYnRuIGJ0bi1hcHByb3ZlIGJ0bi1zbVwiIG9uQ2xpY2s9eygpID0+IGV4ZWMoKCkgPT4gcmV2aWV3QXR1bU1hcHBpbmcobS5pZCwgXCJhcHByb3ZlXCIpLCBcIkFwcHJvdmVkLlwiKX0+QXBwcm92ZTwvYnV0dG9uPlxyXG4gICAgICAgICAgICAgICAgICAgICAgICAgIDxidXR0b24gY2xhc3NOYW1lPVwiYnRuIGJ0bi1yZWplY3QgIGJ0bi1zbVwiIG9uQ2xpY2s9eygpID0+IGV4ZWMoKCkgPT4gcmV2aWV3QXR1bU1hcHBpbmcobS5pZCwgXCJyZWplY3RcIiksICBcIlJlamVjdGVkLlwiKX0+UmVqZWN0PC9idXR0b24+XHJcbiAgICAgICAgICAgICAgICAgICAgICAgIDwvZGl2PlxyXG4gICAgICAgICAgICAgICAgICAgICAgICA8c2VsZWN0XHJcbiAgICAgICAgICAgICAgICAgICAgICAgICAgY2xhc3NOYW1lPVwib3ZlcnJpZGUtc2VsZWN0XCJcclxuICAgICAgICAgICAgICAgICAgICAgICAgICBkZWZhdWx0VmFsdWU9XCJcIlxyXG4gICAgICAgICAgICAgICAgICAgICAgICAgIG9uQ2hhbmdlPXtlID0+IHsgaWYgKGUudGFyZ2V0LnZhbHVlKSBleGVjKCgpID0+IHJldmlld0F0dW1NYXBwaW5nKG0uaWQsIFwiYXBwcm92ZVwiLCBlLnRhcmdldC52YWx1ZSksIFwiT3ZlcnJpZGRlbi5cIik7IH19XHJcbiAgICAgICAgICAgICAgICAgICAgICAgID5cclxuICAgICAgICAgICAgICAgICAgICAgICAgICA8b3B0aW9uIHZhbHVlPVwiXCI+T3ZlcnJpZGXigKY8L29wdGlvbj5cclxuICAgICAgICAgICAgICAgICAgICAgICAgICB7dGF4b25vbXkuc2xpY2UoMCwgNjApLm1hcCh0ID0+IChcclxuICAgICAgICAgICAgICAgICAgICAgICAgICAgIDxvcHRpb24ga2V5PXt0LmlkfSB2YWx1ZT17dC5pZH0+e3QucGF0aH08L29wdGlvbj5cclxuICAgICAgICAgICAgICAgICAgICAgICAgICApKX1cclxuICAgICAgICAgICAgICAgICAgICAgICAgPC9zZWxlY3Q+XHJcbiAgICAgICAgICAgICAgICAgICAgICA8L2Rpdj5cclxuICAgICAgICAgICAgICAgICAgICApfVxyXG4gICAgICAgICAgICAgICAgICA8L3RkPlxyXG4gICAgICAgICAgICAgICAgPC90cj5cclxuICAgICAgICAgICAgICApKX1cclxuICAgICAgICAgICAgPC90Ym9keT5cclxuICAgICAgICAgIDwvdGFibGU+XHJcbiAgICAgICAgKX1cclxuICAgICAgPC9kaXY+XHJcbiAgICA8L2Rpdj5cclxuICApO1xyXG59XHJcbiJdLCJmaWxlIjoiQzovSW50ZXJuYWwgUHJvamVjdC9vZmZpY2UtaGFja2F0aG9uLTIwMjYvVEJNLWhhY2svYXBwcy93ZWIvc3JjL2NvbXBvbmVudHMvcGlwZWxpbmUvQXR1bVBoYXNlLnRzeCJ9
