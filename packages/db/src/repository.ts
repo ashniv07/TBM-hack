@@ -1,6 +1,7 @@
 import { getPool } from "./pool";
 import {
   CanonicalSchema,
+  ColumnMapping,
   ContextAliasInput,
   ContextDatasetNodeInput,
   ContextEdgeInput,
@@ -22,6 +23,7 @@ import {
   ReadinessScore,
   ReadinessScoreView,
   SemanticMatch,
+  TemplateCoverageRow,
   AtumEntityClassification,
   AtumLayer,
   AtumMapping,
@@ -140,6 +142,122 @@ export async function recordRun(datasetId: string, stage: string, status: "runni
      values ($1, $2, $3, $4, case when $3 = 'running' then null else now() end)`,
     [datasetId, stage, status, error ?? null]
   );
+}
+
+// ---------- Source-to-template column mapping ----------
+
+/**
+ * Replaces a dataset's entire mapping in one transaction, preserving any
+ * reviewer overrides: a re-run must not silently undo a human decision.
+ */
+export async function saveTemplateMapping(input: {
+  datasetId: string;
+  masterType: string | null;
+  expectedCount: number;
+  matchedCount: number;
+  coverage: number;
+  mappings: { sourceColumn: string; templateColumn: string | null; confidence: number; method: string }[];
+  missingColumns: string[];
+}): Promise<void> {
+  const client = await getPool().connect();
+  try {
+    await client.query("begin");
+    await client.query(
+      `update datasets set master_type = $2, template_coverage = $3,
+         template_expected_count = $4, template_matched_count = $5, updated_at = now()
+       where id = $1`,
+      [input.datasetId, input.masterType, input.coverage, input.expectedCount, input.matchedCount]
+    );
+
+    const { rows: overridden } = await client.query(
+      `select source_column from column_mappings where dataset_id = $1 and is_override = true`,
+      [input.datasetId]
+    );
+    const keep = new Set(overridden.map((r: any) => r.source_column));
+
+    await client.query(`delete from column_mappings where dataset_id = $1 and is_override = false`, [input.datasetId]);
+    await client.query(`delete from missing_template_columns where dataset_id = $1`, [input.datasetId]);
+
+    const fresh = input.mappings.filter((m) => !keep.has(m.sourceColumn));
+    for (const batch of chunk(fresh, WRITE_BATCH_SIZE)) {
+      const params: unknown[] = [];
+      const tuples = batch.map((m, i) => {
+        params.push(input.datasetId, m.sourceColumn, m.templateColumn, m.confidence, m.method);
+        const b = i * 5;
+        return `($${b + 1}, $${b + 2}, $${b + 3}, $${b + 4}, $${b + 5})`;
+      });
+      await client.query(
+        `insert into column_mappings (dataset_id, source_column, template_column, confidence, method)
+         values ${tuples.join(", ")}
+         on conflict (dataset_id, source_column) do update set
+           template_column = excluded.template_column, confidence = excluded.confidence,
+           method = excluded.method, updated_at = now()`,
+        params
+      );
+    }
+
+    for (const batch of chunk(input.missingColumns, WRITE_BATCH_SIZE)) {
+      const params: unknown[] = [];
+      const tuples = batch.map((c, i) => {
+        params.push(input.datasetId, c);
+        return `($${i * 2 + 1}, $${i * 2 + 2})`;
+      });
+      await client.query(
+        `insert into missing_template_columns (dataset_id, template_column) values ${tuples.join(", ")}
+         on conflict (dataset_id, template_column) do nothing`,
+        params
+      );
+    }
+    await client.query("commit");
+  } catch (err) {
+    await client.query("rollback");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+export async function getColumnMappings(datasetId: string): Promise<ColumnMapping[]> {
+  const { rows } = await getPool().query<ColumnMapping>(
+    `select * from column_mappings where dataset_id = $1 order by template_column nulls last, source_column`,
+    [datasetId]
+  );
+  return rows;
+}
+
+export async function getMissingTemplateColumns(datasetId: string): Promise<string[]> {
+  const { rows } = await getPool().query(
+    `select template_column from missing_template_columns where dataset_id = $1 order by template_column`,
+    [datasetId]
+  );
+  return rows.map((r: any) => r.template_column);
+}
+
+export async function getTemplateCoverage(): Promise<TemplateCoverageRow[]> {
+  const { rows } = await getPool().query<TemplateCoverageRow>(
+    `select id as dataset_id, file_name, master_type, template_coverage,
+            template_expected_count, template_matched_count
+     from datasets order by template_coverage desc nulls last, file_name`
+  );
+  return rows;
+}
+
+/** Reviewer re-points a mapping; flagged so a re-run never overwrites it. */
+export async function overrideColumnMapping(
+  datasetId: string,
+  sourceColumn: string,
+  templateColumn: string | null
+): Promise<ColumnMapping | null> {
+  const { rows } = await getPool().query<ColumnMapping>(
+    `insert into column_mappings (dataset_id, source_column, template_column, confidence, method, is_override)
+     values ($1, $2, $3, 1, 'manual', true)
+     on conflict (dataset_id, source_column) do update set
+       template_column = excluded.template_column, confidence = 1,
+       method = 'manual', is_override = true, updated_at = now()
+     returning *`,
+    [datasetId, sourceColumn, templateColumn]
+  );
+  return rows[0] ?? null;
 }
 
 // ---------- Stage 2: Intelligent Data Understanding ----------

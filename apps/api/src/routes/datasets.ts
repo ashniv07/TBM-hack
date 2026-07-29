@@ -2,7 +2,7 @@ import { Router } from "express";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
-import { runEmbedding, runIngestion, runUnderstanding } from "@tbm/langgraph";
+import { mapDatasetToTemplate, runEmbedding, runIngestion, runUnderstanding } from "@tbm/langgraph";
 import { getDataset, getDatasetColumns, getRelationshipsForDataset, listDatasets } from "@tbm/db";
 import { wrap } from "../wrap";
 
@@ -54,6 +54,9 @@ datasetsRouter.post("/upload", upload.array("files", 20), wrap(async (req, res) 
           // demonstrates the full pipeline. Failures here don't roll back
           // ingestion — the dataset still shows up in the catalog either way.
           try {
+            // Match the source columns onto their Apptio master template first:
+            // everything downstream is "how well does this satisfy the template".
+            await mapDatasetToTemplate(ingested.datasetId);
             await runUnderstanding(ingested.datasetId);
             await runEmbedding(ingested.datasetId, { uploadsDir: UPLOAD_DIR, rows: ingested.sheet?.rows });
           } catch (stageErr) {

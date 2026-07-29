@@ -19,8 +19,34 @@ export interface Dataset {
   row_count: number | null;
   uploaded_by: string | null;
   business_purpose: string | null;
+  /** Which Apptio master template this source file targets. */
+  master_type: string | null;
+  template_coverage: number | null;
+  template_expected_count: number | null;
+  template_matched_count: number | null;
   uploaded_at: string;
   updated_at: string;
+}
+
+export interface ColumnMapping {
+  id: string;
+  dataset_id: string;
+  source_column: string;
+  /** null = the source supplied a column the template has no place for. */
+  template_column: string | null;
+  confidence: number;
+  method: string;
+  is_override: boolean;
+}
+
+/** "The template expects N columns; this file supplies M." */
+export interface TemplateCoverageRow {
+  dataset_id: string;
+  file_name: string;
+  master_type: string | null;
+  template_coverage: number | null;
+  template_expected_count: number | null;
+  template_matched_count: number | null;
 }
 
 export interface DatasetColumn {

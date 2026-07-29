@@ -13,8 +13,8 @@ import {
   runStandardization,
   runUnderstanding,
 } from "@tbm/langgraph";
-import { AtumLayer, getDatasetColumns, syncAtumEdgesToGraph } from "@tbm/db";
-import { inferMasterType } from "@tbm/langgraph";
+import { AtumLayer, getColumnMappings, getDataset, syncAtumEdgesToGraph } from "@tbm/db";
+import { mapDatasetToTemplate } from "@tbm/langgraph";
 import { UPLOAD_DIR } from "./routes/datasets";
 
 const DATA_DIR = path.join(__dirname, "..", "..", "..", "packages", "langgraph", "data");
@@ -78,6 +78,7 @@ async function seed() {
             failures.push({ fileName, stage: "ingestion", error: result.error ?? "no datasetId" });
             return;
           }
+          await mapDatasetToTemplate(result.datasetId);
           await runUnderstanding(result.datasetId);
           await runEmbedding(result.datasetId, { uploadsDir: UPLOAD_DIR, rows: result.sheet?.rows });
           ingested++;
@@ -97,18 +98,18 @@ async function seed() {
   // how many does the customer's file actually supply?
   console.log("\nColumn coverage vs master templates:");
   for (const { datasetId, fileName } of ingestedDatasets) {
-    const columns = (await getDatasetColumns(datasetId)).map((c) => c.column_name);
-    const guess = inferMasterType(columns);
-    if (!guess) {
-      console.log(`  ${fileName}: no master template recognised (${columns.length} columns)`);
+    const dataset = await getDataset(datasetId);
+    if (!dataset?.master_type) {
+      console.log(`  ${fileName}: no master template recognised`);
       continue;
     }
-    const { coverage: cov, template } = guess;
+    const unmapped = (await getColumnMappings(datasetId)).filter((m) => !m.template_column).length;
     console.log(
       `  ${fileName}\n` +
-        `     -> ${template.masterType}  (runner-up: ${guess.runnerUp ?? "none"})\n` +
-        `        supplies ${cov.matchedCount}/${cov.expectedCount} expected columns = ${Math.round(cov.coverage * 100)}% coverage\n` +
-        `        ${cov.unmappedSourceColumns.length} of its ${columns.length} columns map to nothing in the template`
+        `     -> ${dataset.master_type}\n` +
+        `        supplies ${dataset.template_matched_count}/${dataset.template_expected_count} expected columns` +
+        ` = ${Math.round(Number(dataset.template_coverage ?? 0) * 100)}% coverage\n` +
+        `        ${unmapped} source column(s) map to nothing in the template`
     );
   }
 
