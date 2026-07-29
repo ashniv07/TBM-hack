@@ -69,6 +69,12 @@ export async function detectIssuesNode(state: StandardizationState): Promise<Par
 
       // Check each column for issues
       for (const col of columns) {
+        // Template scaffolding and other technical columns carry no business
+        // meaning, so quality findings about them are pure noise for a
+        // reviewer — 323 of 447 issues on the sample set were type mismatches
+        // on join keys and benchmark helpers.
+        if (col.is_technical) continue;
+
         // 1. Missing value detection (from profiling data)
         if (col.null_pct !== null && col.null_pct > 50) {
           issues.push({
@@ -88,7 +94,16 @@ export async function detectIssuesNode(state: StandardizationState): Promise<Par
         // 2. Schema mismatch detection
         if (dataset.source_type && col.semantic_role) {
           const canonical = schemaBySourceRole.get(`${dataset.source_type}::${col.semantic_role}`);
-          if (canonical && canonical.inferredType !== col.inferred_type) {
+          // "other" is a catch-all holding dozens of unrelated columns, so
+          // whichever one happened to define it is not a canonical type for the
+          // rest. And a mismatch against "unknown" (an all-empty column) yields
+          // the uselessly circular "convert column values to unknown type".
+          const comparable =
+            canonical &&
+            col.semantic_role !== "other" &&
+            canonical.inferredType !== "unknown" &&
+            col.inferred_type !== "unknown";
+          if (comparable && canonical!.inferredType !== col.inferred_type) {
             issues.push({
               datasetId: dataset.id,
               columnId: col.id,

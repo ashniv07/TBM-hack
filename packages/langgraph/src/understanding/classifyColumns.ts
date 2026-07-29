@@ -110,6 +110,39 @@ const DETERMINISTIC_ROLE_OVERRIDES: Record<string, (typeof SEMANTIC_ROLES)[numbe
   ponumber: "identifier",
 };
 
+// The sample workbooks are Apptio *templates*, so roughly a quarter of every
+// file (272 of 1,133 column instances across the 19 samples) is scaffolding
+// rather than business data: join keys ("Server_App Key", "Vendor_ITRT Key
+// Metafield"), the template's own QA helpers ("Validity_Cost Center",
+// "Completeness_Total"), benchmark reference values, Excel lookup columns, and
+// UID/OID metafields.
+//
+// These must be forced technical rather than left to the classifier. The
+// heuristic TECHNICAL_NAME_PATTERN above only runs when there is no LLM, and
+// its `_key$` does not match "Server_App Key" anyway (space, not underscore).
+// With a key configured the LLM decides, and it does not flag them — which is
+// how ~24% of columns ended up in canonical schemas and produced hundreds of
+// meaningless "type mismatch" issues.
+//
+// Real client extracts will not follow the template exactly, so this is a
+// filter, not a schema: anything that does not match is still classified
+// normally, and a file missing these columns entirely is unaffected.
+const TEMPLATE_SCAFFOLDING_PATTERNS: RegExp[] = [
+  /(^|[ _])key( metafield)?$/i,   // Server_App Key, Vendor_ITRT Key Metafield
+  /metafield/i,                   // UID Metafield, OID Metafield
+  /benchmark/i,                   // Benchmark Amount / Cost Pool / Tower — reference, not actuals
+  /^data dimensions_/i,           // Data Dimensions_Duplicate Count
+  /^(uid|oid)$/i,
+  /^(validity|completeness)_/i,   // the template's own data-quality helper columns
+  /lookup$/i,                     // Service Name Lookup, Instance Type Lookup
+  /^source table$/i,
+];
+
+export function isTemplateScaffolding(columnName: string): boolean {
+  const name = columnName.trim();
+  return TEMPLATE_SCAFFOLDING_PATTERNS.some((pattern) => pattern.test(name));
+}
+
 // A "+" in a column name (e.g. "Cost Center + Name") is a strong, low-false-
 // positive signal that the column is a derived/concatenated display label
 // built from other, more atomic columns that are already classified (and
@@ -120,6 +153,11 @@ const CONCATENATED_COLUMN_PATTERN = /\+/;
 
 export function applyDeterministicRoleOverrides(classifications: ColumnClassification[]): ColumnClassification[] {
   return classifications.map((c) => {
+    // Checked first: scaffolding is technical no matter what it is named after
+    // ("Benchmark Cost Pool" must not become a cost_center entity).
+    if (isTemplateScaffolding(c.columnName)) {
+      return { ...c, semanticRole: "identifier", semanticRoleConfidence: 1, isTechnical: true };
+    }
     if (CONCATENATED_COLUMN_PATTERN.test(c.columnName)) {
       return { ...c, semanticRole: "description", semanticRoleConfidence: 1, isTechnical: false };
     }
