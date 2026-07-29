@@ -89,7 +89,21 @@ interface WeightedEdge {
 // no animation loop needed for a static "understand the shape of the graph"
 // view. Edge `strength` scales the attractive force for that edge, so
 // structurally-linked nodes end up visually closer than semantically-linked ones.
-function forceDirectedLayout(nodeIds: string[], edges: WeightedEdge[], width: number, height: number) {
+//
+// `nodeType` adds a same-type clustering bias on top of that: vendors drift
+// toward other vendors, infra assets toward other infra assets, etc.
+// Without it, a graph with hundreds of edges (most of them the same
+// business-relationship type) reads as one undifferentiated mass — nothing
+// visually distinguishes "the vendor neighborhood" from "the cost-center
+// neighborhood" even though the colors are already there to see it, because
+// same-type nodes end up scattered randomly by pure repulsion.
+function forceDirectedLayout(
+  nodeIds: string[],
+  edges: WeightedEdge[],
+  width: number,
+  height: number,
+  nodeType?: Map<string, string>
+) {
   const positions = new Map<string, { x: number; y: number }>();
   if (nodeIds.length === 0) return positions;
 
@@ -120,7 +134,11 @@ function forceDirectedLayout(nodeIds: string[], edges: WeightedEdge[], width: nu
         let dx = pa.x - pb.x;
         let dy = pa.y - pb.y;
         const dist = Math.sqrt(dx * dx + dy * dy) || 0.01;
-        const force = (k * k) / dist;
+        const sameType = nodeType && nodeType.get(a) === nodeType.get(b);
+        // Same-type pairs repel far more weakly and get a small extra pull
+        // toward each other — enough to cluster loosely by color without
+        // collapsing into an unreadable clump of their own.
+        const force = sameType ? (k * k * 0.22) / dist - k * 0.12 : (k * k) / dist;
         dx = (dx / dist) * force;
         dy = (dy / dist) * force;
         disp.get(a)!.x += dx;
@@ -266,16 +284,40 @@ export function GraphVisualization({
       b: e.to_entity_id,
       strength: EDGE_STRENGTH[e.edge_type] ?? 1,
     }));
-    return forceDirectedLayout(ids, edgePairs, width, height);
+    const nodeType = new Map(visibleNodes.map((n) => [n.id, n.entity_type]));
+    return forceDirectedLayout(ids, edgePairs, width, height, nodeType);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nodeIdsKey, width, height]);
+
+  // "Fit everything" has to mean the actual bounding box of where nodes ended
+  // up, not the full nominal width×height canvas. The layout allocates that
+  // whole canvas up front, but real content (especially a handful of small,
+  // far-flung disconnected components) usually only fills a fraction of it —
+  // fitting the raw canvas left the real cluster tiny in a corner.
+  const contentBounds = useMemo(() => {
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const n of visibleNodes) {
+      const p = positions.get(n.id);
+      if (!p) continue;
+      minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+      minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+    }
+    if (!isFinite(minX)) return { x: 0, y: 0, w: width, h: height };
+    const pad = 70;
+    return {
+      x: minX - pad,
+      y: minY - pad,
+      w: Math.max(240, maxX - minX + pad * 2),
+      h: Math.max(180, maxY - minY + pad * 2),
+    };
+  }, [positions, visibleNodes, width, height]);
 
   // Pan/zoom is a plain SVG viewBox rectangle (vbX, vbY, vbW, vbH) rather than
   // a CSS transform — cheaper to reason about (all math stays in the same
   // coordinate space as `positions`) and it's what makes native browser
   // scrollbars unnecessary, which is what made the old fixed-pixel-size SVG
   // hard to move around.
-  const [view, setView] = useState({ x: 0, y: 0, w: width, h: height });
+  const [view, setView] = useState(contentBounds);
   const dragRef = useRef<{ x: number; y: number; vbX: number; vbY: number } | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
 
@@ -283,8 +325,36 @@ export function GraphVisualization({
   // filter toggle, a rebuild, switching entities) — otherwise the user can be
   // left panned/zoomed into empty space after the graph under them changes.
   useEffect(() => {
-    setView({ x: 0, y: 0, w: width, h: height });
+    setView(contentBounds);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nodeIdsKey, width, height]);
+
+  // Clicking a node commits to it (unlike hover, which is just a preview) —
+  // pan/zoom to frame that node and its direct neighbors so their labels
+  // actually have room to not overlap, instead of leaving the camera at
+  // whatever overview zoom level it happened to be at.
+  useEffect(() => {
+    if (!selectedId) return;
+    const neighborIds = new Set<string>([selectedId]);
+    for (const e of visibleEdges) {
+      if (e.from_entity_id === selectedId) neighborIds.add(e.to_entity_id);
+      else if (e.to_entity_id === selectedId) neighborIds.add(e.from_entity_id);
+    }
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const id of neighborIds) {
+      const p = positions.get(id);
+      if (!p) continue;
+      minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+      minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+    }
+    if (!isFinite(minX)) return;
+    const pad = 140;
+    const w = Math.max(320, maxX - minX + pad * 2);
+    const h = Math.max(240, maxY - minY + pad * 2);
+    const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+    setView({ x: cx - w / 2, y: cy - h / 2, w, h });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId]);
 
   const ZOOM_MIN = width / 6000; // deepest zoom-in: ~6000px of virtual space visible
   const ZOOM_MAX = 2.5; // furthest zoom-out: 2.5x the fitted view
@@ -306,7 +376,7 @@ export function GraphVisualization({
   }
 
   function resetView() {
-    setView({ x: 0, y: 0, w: width, h: height });
+    setView(contentBounds);
   }
 
   function handlePointerDown(e: ReactPointerEvent<SVGSVGElement>) {
@@ -380,8 +450,18 @@ export function GraphVisualization({
           if (!a || !b) return null;
           const isStructural = e.edge_type === "foreign_key";
           const color = EDGE_COLOR[e.edge_type] ?? "#4a4f5c";
+          const isFocused = focusNeighbors !== null;
           const touchesFocus = !focusNeighbors || (focusNeighbors.has(e.from_entity_id) && focusNeighbors.has(e.to_entity_id) && (e.from_entity_id === focusId || e.to_entity_id === focusId));
-          const dimmed = focusNeighbors !== null && !touchesFocus;
+          const dimmed = isFocused && !touchesFocus;
+          // Most co-occurrence edges carry a business label (USES_VENDOR,
+          // CONTRACTED_WITH, ...) — treating "has a label" as "render at full
+          // strength" meant nearly every edge in a dense graph rendered at 90%
+          // opacity, producing one solid wall of lines. Full strength is now
+          // reserved for real structural (foreign-key) edges and for whatever
+          // is actually focused; everything else in the unfocused overview
+          // fades toward a soft density texture instead.
+          const baseOpacity = isStructural ? 0.9 : isFocused && touchesFocus ? 0.9 : 0.12 + e.confidence * 0.22;
+          const maxWidth = isFocused || !denseGraph ? 6 : 3;
           return (
             <g key={i}>
               <line
@@ -390,8 +470,8 @@ export function GraphVisualization({
                 x2={b.x}
                 y2={b.y}
                 stroke={color}
-                strokeWidth={isStructural ? Math.min(2 + Math.log2(e.weight + 1), 8) : Math.min(1 + Math.log2(e.weight + 1), 6)}
-                strokeOpacity={dimmed ? 0.04 : isStructural || e.label ? 0.9 : 0.25 + e.confidence * 0.5}
+                strokeWidth={isStructural ? Math.min(2 + Math.log2(e.weight + 1), 8) : Math.min(1 + Math.log2(e.weight + 1), maxWidth)}
+                strokeOpacity={dimmed ? 0.04 : baseOpacity}
               >
                 <title>
                   {e.edge_type}
@@ -416,7 +496,14 @@ export function GraphVisualization({
           const canCollapse = isGroup && groupIdsWithChildren.has(n.id);
           const inFocus = !focusNeighbors || focusNeighbors.has(n.id);
           const isFocalNode = n.id === focusId;
-          const showLabel = inFocus && (isFocalNode || !denseGraph || zoomFactor > 1.3 || focusNeighbors !== null);
+          // A click commits to a node and auto-frames it + its neighbors (see
+          // the selectedId effect above), so there's room for every neighbor's
+          // label. A hover is just a quick preview at whatever zoom level the
+          // user was already at — forcing every neighbor's label on for a
+          // highly-connected node is exactly what produced illegible
+          // overlapping text, so hover only guarantees the focal node's own label.
+          const isClickFocus = !hoverId && selectedId !== undefined && focusId === selectedId;
+          const showLabel = inFocus && (isFocalNode || isClickFocus || !denseGraph || zoomFactor > 1.3);
           return (
             <g
               key={n.id}

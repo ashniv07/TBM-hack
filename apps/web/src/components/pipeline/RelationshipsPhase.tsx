@@ -128,19 +128,38 @@ export function RelationshipsPhase({ datasets }: Props) {
     });
   }
 
+  // "Connected" has to be judged against the edges that survive the current
+  // type filter, not the whole graph — otherwise a node whose only edge leads
+  // to a type the user just filtered out reads as "connected" (it globally
+  // is) but renders with no visible edge at all, i.e. it looks exactly like
+  // the isolated nodes "show unconnected entities too" is supposed to hide.
+  const typeFilteredNodes = useMemo(
+    () => businessNodes.filter(n => visibleTypes.has(n.entity_type)),
+    [businessNodes, visibleTypes]
+  );
+
+  const typeFilteredEdges = useMemo(() => {
+    const ids = new Set(typeFilteredNodes.map(n => n.id));
+    return meaningfulEdges.filter(e => ids.has(e.from_entity_id) && ids.has(e.to_entity_id));
+  }, [meaningfulEdges, typeFilteredNodes]);
+
   const graphNodes = useMemo((): VizNode[] => {
-    return businessNodes
-      .filter(n => visibleTypes.has(n.entity_type))
-      .filter(n => showIsolated || connectedIds.has(n.id))
+    if (showIsolated) {
+      return typeFilteredNodes.map(n => ({ id: n.id, entity_type: n.entity_type, canonical_name: n.canonical_name, resolution_confidence: n.resolution_confidence }));
+    }
+    const locallyConnected = new Set<string>();
+    typeFilteredEdges.forEach(e => { locallyConnected.add(e.from_entity_id); locallyConnected.add(e.to_entity_id); });
+    return typeFilteredNodes
+      .filter(n => locallyConnected.has(n.id))
       .map(n => ({ id: n.id, entity_type: n.entity_type, canonical_name: n.canonical_name, resolution_confidence: n.resolution_confidence }));
-  }, [businessNodes, visibleTypes, showIsolated, connectedIds]);
+  }, [typeFilteredNodes, typeFilteredEdges, showIsolated]);
 
   const graphEdges = useMemo((): VizEdge[] => {
     const ids = new Set(graphNodes.map(n => n.id));
-    return meaningfulEdges
+    return typeFilteredEdges
       .filter(e => ids.has(e.from_entity_id) && ids.has(e.to_entity_id))
       .map(e => ({ from_entity_id: e.from_entity_id, to_entity_id: e.to_entity_id, edge_type: e.edge_type, weight: e.weight, confidence: e.confidence, label: e.label }));
-  }, [meaningfulEdges, graphNodes]);
+  }, [typeFilteredEdges, graphNodes]);
 
   const browseResults = useMemo(() => {
     const q = search.trim().toLowerCase();
