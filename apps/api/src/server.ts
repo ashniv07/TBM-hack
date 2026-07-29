@@ -11,7 +11,6 @@ import { contextRouter } from "./routes/context";
 import { standardizationRouter } from "./routes/standardization";
 import { atumRouter } from "./routes/atum";
 import { tbmRouter } from "./routes/tbm";
-import { tbmExportRouter } from "./routes/tbmExport";
 import { assistantRouter } from "./routes/assistant";
 import { analyticsRouter } from "./routes/analytics";
 
@@ -26,7 +25,6 @@ app.use("/api/context", contextRouter);
 app.use("/api/standardization", standardizationRouter);
 app.use("/api/atum", atumRouter);
 app.use("/api/tbm", tbmRouter);
-app.use("/api/tbm-export", tbmExportRouter);
 app.use("/api/assistant", assistantRouter);
 app.use("/api/analytics", analyticsRouter);
 

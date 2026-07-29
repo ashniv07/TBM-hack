@@ -16,5 +16,4 @@ export * from "./tbm/assemble";
 export * from "./tbm/costFacts";
 export * from "./tbm/buildModel";
 export * from "./tbm/exportWorkbook";
-export * from "./tbmExport";
 export * from "./assistant";

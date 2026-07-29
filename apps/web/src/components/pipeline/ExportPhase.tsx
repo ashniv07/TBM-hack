@@ -1,84 +1,87 @@
-import { useState, useEffect } from "react";
-import {
-  TbmExportSummary, TbmExportType, TbmExportFormat, TbmDataModel, TbmExport,
-  fetchTbmExportSummary, generateTbmExport, fetchTbmExports, downloadTbmExport,
-} from "../../api";
+import { useEffect, useMemo, useState } from "react";
+import { TBM_EXPORT_URL, TbmDataModel, fetchTbmModel } from "../../api";
 
-type Tab = "preview" | "generate" | "history";
+// Backed by the derived Stage 7 model (GET /api/tbm), assembled on request from
+// the context graph, approved ATUM mappings and readiness scores. There is no
+// export job to queue and no history to list — regenerating just re-reads
+// current state, so the export can never go stale against the graph.
+
+type Tab = "objects" | "cost" | "relationships" | "datasets";
+
+const PREVIEW_ROWS = 40;
+const money = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 
 export function ExportPhase() {
-  const [summary, setSummary] = useState<TbmExportSummary | null>(null);
-  const [exports, setExports] = useState<TbmExport[]>([]);
-  const [model,   setModel]   = useState<TbmDataModel | null>(null);
-  const [busy,    setBusy]    = useState(false);
-  const [error,   setError]   = useState("");
-  const [message, setMessage] = useState("");
-  const [tab,     setTab]     = useState<Tab>("preview");
+  const [model, setModel] = useState<TbmDataModel | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [tab, setTab] = useState<Tab>("objects");
+  const [typeFilter, setTypeFilter] = useState("all");
 
-  const [exportType,           setExportType]           = useState<TbmExportType>("full");
-  const [format,               setFormat]               = useState<TbmExportFormat>("xlsx");
-  const [confidenceThreshold,  setConfidenceThreshold]  = useState(0.7);
-  const [includeLowConfidence, setIncludeLowConfidence] = useState(false);
+  async function load() {
+    setBusy(true);
+    setError("");
+    try {
+      setModel(await fetchTbmModel());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to build TBM data model");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   useEffect(() => {
-    fetchTbmExportSummary().then(setSummary).catch(console.error);
-    fetchTbmExports().then(setExports).catch(console.error);
+    void load();
   }, []);
 
-  async function generate() {
-    setBusy(true); setError(""); setMessage("");
-    try {
-      const r = await generateTbmExport({ exportType, format, confidenceThreshold, includeLowConfidence, saveFile: true });
-      setModel(r.model);
-      setMessage(`Export generated: ${r.recordCount} records`);
-      setExports(await fetchTbmExports());
-      setTab("generate");
-    } catch (e) { setError(e instanceof Error ? e.message : "Export failed"); }
-    finally { setBusy(false); }
-  }
+  const objects = useMemo(
+    () => (!model ? [] : typeFilter === "all" ? model.objects : model.objects.filter((o) => o.objectType === typeFilter)),
+    [model, typeFilter]
+  );
 
-  async function download(id: string, fmt: TbmExportFormat) {
-    try { await downloadTbmExport(id, fmt); }
-    catch (e) { setError(e instanceof Error ? e.message : "Download failed"); }
-  }
+  const cards = model
+    ? [
+        { label: "Total Spend", value: money.format(model.summary.totalCost) },
+        { label: "Business Objects", value: model.summary.objects.toLocaleString() },
+        { label: "ATUM Coverage", value: `${Math.round(model.summary.classificationCoverage * 100)}%` },
+        { label: "Relationships", value: model.summary.relationships.toLocaleString() },
+      ]
+    : [];
+
+  const overflow =
+    tab === "objects" ? objects.length : tab === "cost" ? model?.costFacts.length ?? 0 : model?.relationships.length ?? 0;
 
   return (
     <div className="phase-panel column">
-      {/* Header */}
       <div className="phase-header">
         <div style={{ flex: 1 }}>
           <p className="phase-subtitle">Export</p>
-          <h2 className="phase-title">TBM Data Model Export</h2>
+          <h2 className="phase-title">TBM Data Model</h2>
         </div>
-        {summary?.readyForExport && (
-          <div className="success-bar" style={{ margin: 0, padding: "6px 12px", fontSize: 12 }}>
-            Ready: {summary.totalEntities} entities · {summary.totalEdges} relationships
-          </div>
-        )}
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <button className="btn btn-secondary" onClick={load} disabled={busy}>
+            {busy ? <><span className="spinner" /> Building…</> : "Regenerate"}
+          </button>
+          <a className="btn btn-primary" href={model ? TBM_EXPORT_URL : undefined} aria-disabled={!model}>
+            Download .xlsx
+          </a>
+        </div>
       </div>
 
-      {/* Tabs */}
-      <div className="dq-tabs">
-        <button className={`dq-tab ${tab === "preview"  ? "active" : ""}`} onClick={() => setTab("preview")}>Preview</button>
-        <button className={`dq-tab ${tab === "generate" ? "active" : ""}`} onClick={() => setTab("generate")}>Generate Export</button>
-        <button className={`dq-tab ${tab === "history"  ? "active" : ""}`} onClick={() => setTab("history")}>History ({exports.length})</button>
-      </div>
-
-      {error   && <div className="error-bar"   style={{ margin: "0 22px" }}>{error}</div>}
-      {message && <div className="success-bar" style={{ margin: "0 22px" }}>{message}</div>}
+      {error && <div className="error-bar" style={{ margin: "0 22px" }}>{error}</div>}
 
       <div style={{ flex: 1, overflow: "auto", padding: "18px 22px" }}>
+        {!model && !busy && (
+          <div className="empty-state" style={{ padding: "40px 0" }}>
+            <div className="empty-icon">📦</div>
+            <div>Run Stages 4–6 first — the model is assembled from the knowledge graph and approved ATUM mappings.</div>
+          </div>
+        )}
 
-        {/* ── Preview ── */}
-        {tab === "preview" && summary && (
+        {model && (
           <>
             <div className="export-preview-grid">
-              {[
-                { label: "Cost Centers", value: summary.costCenters },
-                { label: "Applications", value: summary.applications },
-                { label: "Vendors",      value: summary.vendors },
-                { label: "Cloud Resources", value: summary.cloudResources },
-              ].map(({ label, value }) => (
+              {cards.map(({ label, value }) => (
                 <div key={label} className="export-preview-card">
                   <div className="export-preview-value">{value}</div>
                   <div className="export-preview-label">{label}</div>
@@ -86,138 +89,112 @@ export function ExportPhase() {
               ))}
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-              <div className="card" style={{ margin: 0 }}>
-                <p className="section-eyebrow">Entity Breakdown</p>
-                {[
-                  ["Business Units", summary.businessUnits],
-                  ["Departments",    summary.departments],
-                  ["Total Entities", summary.totalEntities],
-                  ["Relationships",  summary.totalEdges],
-                ].map(([label, value]) => (
-                  <div key={label as string} style={{ display: "flex", justifyContent: "space-between", padding: "5px 0", borderBottom: "1px solid var(--border-soft)", fontSize: 12 }}>
-                    <span className="text-muted">{label}</span>
-                    <span style={{ fontWeight: label === "Total Entities" ? 700 : 400, color: label === "Total Entities" ? "var(--accent)" : "var(--text-primary)" }}>{(value as number).toLocaleString()}</span>
-                  </div>
+            {model.warnings.length > 0 && (
+              <div className="card" style={{ margin: "0 0 16px" }}>
+                <p className="section-eyebrow">Before loading into Apptio</p>
+                {model.warnings.map((w) => (
+                  <div key={w} className="text-warning" style={{ fontSize: 12, padding: "4px 0" }}>{w}</div>
                 ))}
               </div>
+            )}
 
-              <div className="card" style={{ margin: 0 }}>
-                <p className="section-eyebrow">Export Options</p>
-                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                  <div>
-                    <div className="text-muted" style={{ fontSize: 11, marginBottom: 4 }}>Export Type</div>
-                    <select className="athena-select" style={{ width: "100%" }} value={exportType} onChange={e => setExportType(e.target.value as TbmExportType)}>
-                      <option value="full">Full Export</option>
-                      <option value="cost_centers">Cost Centers Only</option>
-                      <option value="applications">Applications Only</option>
-                      <option value="vendors">Vendors Only</option>
-                      <option value="cloud_resources">Cloud Resources Only</option>
-                    </select>
-                  </div>
-                  <div>
-                    <div className="text-muted" style={{ fontSize: 11, marginBottom: 4 }}>Format</div>
-                    <select className="athena-select" style={{ width: "100%" }} value={format} onChange={e => setFormat(e.target.value as TbmExportFormat)}>
-                      <option value="xlsx">Excel (.xlsx)</option>
-                      <option value="csv">CSV</option>
-                      <option value="json">JSON</option>
-                    </select>
-                  </div>
-                  <div>
-                    <div className="text-muted" style={{ fontSize: 11, marginBottom: 4 }}>Confidence Threshold: {Math.round(confidenceThreshold * 100)}%</div>
-                    <input type="range" min={0} max={100} value={Math.round(confidenceThreshold * 100)}
-                      onChange={e => setConfidenceThreshold(+e.target.value / 100)}
-                      style={{ width: "100%", accentColor: "var(--accent)" }} />
-                  </div>
-                  <label className="toggle">
-                    <input type="checkbox" checked={includeLowConfidence} onChange={e => setIncludeLowConfidence(e.target.checked)} />
-                    Include low-confidence records
-                  </label>
-                  <button className="btn btn-primary" onClick={generate} disabled={busy} style={{ width: "100%", marginTop: 4 }}>
-                    {busy ? <><span className="spinner" /> Generating…</> : exports.length > 0 ? "Generate Again" : "Generate Export"}
-                  </button>
-                </div>
-              </div>
+            <div className="dq-tabs">
+              <button className={`dq-tab ${tab === "objects" ? "active" : ""}`} onClick={() => setTab("objects")}>Objects ({model.objects.length})</button>
+              <button className={`dq-tab ${tab === "cost" ? "active" : ""}`} onClick={() => setTab("cost")}>Cost Facts ({model.costFacts.length})</button>
+              <button className={`dq-tab ${tab === "relationships" ? "active" : ""}`} onClick={() => setTab("relationships")}>Relationships ({model.relationships.length})</button>
+              <button className={`dq-tab ${tab === "datasets" ? "active" : ""}`} onClick={() => setTab("datasets")}>Sources ({model.sourceDatasets.length})</button>
+              {tab === "objects" && (
+                <select className="athena-select" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} style={{ marginLeft: "auto" }}>
+                  <option value="all">All types</option>
+                  {Object.entries(model.summary.objectsByType).map(([t, n]) => (
+                    <option key={t} value={t}>{t} ({n})</option>
+                  ))}
+                </select>
+              )}
             </div>
+
+            {tab === "objects" && (
+              <table className="athena-table">
+                <thead><tr><th>Object</th><th>Type</th><th>Cost Pool</th><th>Resource Tower</th><th>Solution</th><th>Confidence</th></tr></thead>
+                <tbody>
+                  {objects.slice(0, PREVIEW_ROWS).map((o) => (
+                    <tr key={o.id}>
+                      <td style={{ fontWeight: 500 }}>{o.name}</td>
+                      <td><span className="source-badge" style={{ fontSize: "8px" }}>{o.objectType}</span></td>
+                      <td style={{ fontSize: 11 }} className={o.costPool ? "" : "text-muted"}>{o.costPool ?? "unallocated"}</td>
+                      <td style={{ fontSize: 11 }} className={o.resourceTower ? "" : "text-muted"}>{o.resourceTower ?? "unallocated"}</td>
+                      <td style={{ fontSize: 11 }} className="text-muted">{o.solution ?? "—"}</td>
+                      <td>{o.atumConfidence === null
+                        ? <span className="text-muted">—</span>
+                        : <span className={`badge ${o.atumConfidence >= 0.8 ? "badge-confidence-high" : "badge-confidence-medium"}`}>{Math.round(o.atumConfidence * 100)}%</span>}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+
+            {tab === "cost" && (
+              <table className="athena-table">
+                <thead><tr><th>Cost Center</th><th>Account</th><th>Cost Pool</th><th>Resource Tower</th><th>Vendor</th><th>Amount</th><th>Lines</th></tr></thead>
+                <tbody>
+                  {model.costFacts.slice(0, PREVIEW_ROWS).map((f, i) => (
+                    <tr key={i}>
+                      <td style={{ fontWeight: 500 }}>{f.costCenter || "—"}</td>
+                      <td style={{ fontSize: 11 }} className="text-muted">{f.account || "—"}</td>
+                      <td style={{ fontSize: 11 }} className={f.costPool ? "" : "text-muted"}>{f.costPool || "unallocated"}</td>
+                      <td style={{ fontSize: 11 }} className={f.resourceTower ? "" : "text-muted"}>{f.resourceTower || "unallocated"}</td>
+                      <td style={{ fontSize: 11 }} className="text-muted">{f.vendor || "—"}</td>
+                      <td style={{ fontWeight: 600 }} className="text-accent">{money.format(f.amount)}</td>
+                      <td style={{ fontSize: 11 }} className="text-muted">{f.lineCount}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+
+            {tab === "relationships" && (
+              <table className="athena-table">
+                <thead><tr><th>From</th><th>Relationship</th><th>To</th><th>Confidence</th><th>Evidence</th></tr></thead>
+                <tbody>
+                  {model.relationships.slice(0, PREVIEW_ROWS).map((r, i) => (
+                    <tr key={i}>
+                      <td style={{ fontWeight: 500 }}>{r.fromName}<br /><span className="text-muted" style={{ fontSize: 10 }}>{r.fromType}</span></td>
+                      <td style={{ fontSize: 11 }} className="text-accent">{r.relationship}</td>
+                      <td style={{ fontWeight: 500 }}>{r.toName}<br /><span className="text-muted" style={{ fontSize: 10 }}>{r.toType}</span></td>
+                      <td><span className={`badge ${r.confidence >= 0.8 ? "badge-confidence-high" : "badge-confidence-medium"}`}>{Math.round(r.confidence * 100)}%</span></td>
+                      <td style={{ fontSize: 11 }} className="text-muted">{r.evidenceDataset ?? "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+
+            {tab === "datasets" && (
+              <table className="athena-table">
+                <thead><tr><th>File</th><th>Source Type</th><th>Rows</th><th>Readiness</th><th>Issues</th><th>TBM Ready</th></tr></thead>
+                <tbody>
+                  {model.sourceDatasets.map((d) => (
+                    <tr key={d.datasetId}>
+                      <td style={{ fontWeight: 500 }}>{d.fileName}</td>
+                      <td style={{ fontSize: 11 }} className="text-muted">{d.sourceType ?? "—"}</td>
+                      <td style={{ fontSize: 11 }} className="text-muted">{d.rowCount?.toLocaleString() ?? "—"}</td>
+                      <td>{d.readinessScore === null
+                        ? <span className="text-muted">not scored</span>
+                        : <span className={`badge ${d.readinessScore >= 0.7 ? "badge-confidence-high" : "badge-confidence-medium"}`}>{Math.round(d.readinessScore * 100)}%</span>}</td>
+                      <td style={{ fontSize: 11 }} className="text-muted">{d.issueCount ?? "—"}{d.criticalIssueCount ? ` (${d.criticalIssueCount} critical)` : ""}</td>
+                      <td><span className={d.tbmReady ? "text-success" : "text-warning"}>{d.tbmReady ? "yes" : "no"}</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+
+            {tab !== "datasets" && overflow > PREVIEW_ROWS && (
+              <p className="text-muted" style={{ fontSize: 11, marginTop: 10 }}>
+                Showing the first {PREVIEW_ROWS} rows — the full model is in the downloadable workbook.
+              </p>
+            )}
           </>
-        )}
-
-        {/* ── Generated Model ── */}
-        {tab === "generate" && model && (
-          <div>
-            {model.costCenters.length > 0 && (
-              <>
-                <p className="section-eyebrow">Cost Centers ({model.costCenters.length})</p>
-                <table className="athena-table" style={{ marginBottom: 20 }}>
-                  <thead>
-                    <tr><th>Code</th><th>Name</th><th>Parent</th><th>Business Unit</th><th>Confidence</th></tr>
-                  </thead>
-                  <tbody>
-                    {model.costCenters.slice(0, 20).map((cc, i) => (
-                      <tr key={i}>
-                        <td><code style={{ fontSize: 11, color: "var(--accent)" }}>{cc.cost_center_code}</code></td>
-                        <td style={{ fontWeight: 500 }}>{cc.cost_center_name}</td>
-                        <td style={{ fontSize: 11 }} className="text-muted">{cc.parent_cost_center_code ?? "—"}</td>
-                        <td style={{ fontSize: 11 }} className="text-muted">{cc.business_unit_name ?? "—"}</td>
-                        <td><span className={`badge ${cc.confidence >= 0.8 ? "badge-confidence-high" : "badge-confidence-medium"}`}>{Math.round(cc.confidence * 100)}%</span></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </>
-            )}
-            {model.vendors.length > 0 && (
-              <>
-                <p className="section-eyebrow">Vendors ({model.vendors.length})</p>
-                <table className="athena-table">
-                  <thead><tr><th>ID</th><th>Name</th><th>Type</th><th>ATUM Pool</th><th>Confidence</th></tr></thead>
-                  <tbody>
-                    {model.vendors.slice(0, 15).map((v, i) => (
-                      <tr key={i}>
-                        <td style={{ fontSize: 11 }} className="text-muted">{v.vendor_id}</td>
-                        <td style={{ fontWeight: 500 }}>{v.vendor_name}</td>
-                        <td style={{ fontSize: 11 }} className="text-muted">{v.vendor_type ?? "—"}</td>
-                        <td style={{ fontSize: 11 }} className="text-muted">{v.atum_cost_pool ?? "—"}</td>
-                        <td><span className={`badge ${v.confidence >= 0.8 ? "badge-confidence-high" : "badge-confidence-medium"}`}>{Math.round(v.confidence * 100)}%</span></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </>
-            )}
-          </div>
-        )}
-
-        {/* ── History ── */}
-        {tab === "history" && (
-          <table className="athena-table">
-            <thead>
-              <tr><th>Type</th><th>Format</th><th>Status</th><th>Records</th><th>Created</th><th>Download</th></tr>
-            </thead>
-            <tbody>
-              {exports.length === 0
-                ? <tr><td colSpan={6}><div className="empty-state" style={{ padding: "24px 0" }}><div className="empty-icon">📋</div><div>No exports yet</div></div></td></tr>
-                : exports.map(e => (
-                  <tr key={e.id}>
-                    <td><span className="source-badge" style={{ fontSize: "8px" }}>{e.export_type}</span></td>
-                    <td style={{ fontSize: 11 }} className="text-muted">{e.format.toUpperCase()}</td>
-                    <td><span className={`badge ${e.status === "completed" ? "badge-status-embedded" : e.status === "failed" ? "badge-status-error" : "badge-status-profiled"}`}>{e.status}</span></td>
-                    <td style={{ fontSize: 12 }} className="text-muted">{e.record_count?.toLocaleString() ?? "—"}</td>
-                    <td style={{ fontSize: 11 }} className="text-muted">{new Date(e.created_at).toLocaleDateString()}</td>
-                    <td>
-                      {e.status === "completed" && (
-                        <div style={{ display: "flex", gap: 4 }}>
-                          {(["xlsx", "csv", "json"] as TbmExportFormat[]).map(fmt => (
-                            <button key={fmt} className="btn btn-secondary btn-sm" onClick={() => download(e.id, fmt)}>{fmt.toUpperCase()}</button>
-                          ))}
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                ))
-              }
-            </tbody>
-          </table>
         )}
       </div>
     </div>
