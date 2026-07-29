@@ -38,6 +38,30 @@ describe("matchColumnsToTemplate", () => {
     expect(r.matches.every((m) => m.method === "normalized")).toBe(true);
   });
 
+  it("does not match on an accidental substring — the real AWS regression", () => {
+    // "linkedaccountid" literally contains "count"; before camelCase
+    // tokenization this produced LinkedAccountId -> Count at 0.7 confidence.
+    const r = matchColumnsToTemplate(["LinkedAccountId"], template(["Count"]));
+    expect(r.matchedCount).toBe(0);
+  });
+
+  it("splits camelCase, so real source systems can match at all", () => {
+    const r = matchColumnsToTemplate(
+      ["PayerAccountName", "TotalCost", "SellerOfRecord"],
+      template(["Payer Account", "Cost", "Seller Of Record"])
+    );
+    expect(r.matchedCount).toBe(3);
+  });
+
+  it("folds abbreviations and drops the AWS tag namespace", () => {
+    const r = matchColumnsToTemplate(
+      ["UsageQuantity", "user: Cost Center", "user:Application"],
+      template(["Usage Qty", "Cost Center", "Application"])
+    );
+    expect(r.matchedCount).toBe(3);
+    expect(r.matches.every((m) => m.confidence >= 0.95)).toBe(true);
+  });
+
   it("does not match on one coincidental shared token", () => {
     const r = matchColumnsToTemplate(["Employee Name"], template(["Vendor Name"]));
     expect(r.matchedCount).toBe(0);

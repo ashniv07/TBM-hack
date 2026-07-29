@@ -41,31 +41,65 @@ function normalize(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
+// Source systems abbreviate; the Apptio template spells things out. Both sides
+// are folded to one canonical token so "UsageQuantity" can reach "Usage Qty".
+const ABBREVIATIONS: Record<string, string> = {
+  qty: "quantity", amt: "amount", num: "number", no: "number",
+  desc: "description", acct: "account", org: "organization",
+  identifier: "id", pct: "percent", avg: "average", dt: "date",
+};
+
+// "user:" is the AWS cost-and-usage-report tag namespace, not part of the name:
+// "user: Cost Center" is the customer's Cost Center column.
+const IGNORED_TOKENS = new Set(["user", "tag", "the", "of", "a"]);
+
+/**
+ * camelCase-aware. Without the split, "PayerAccountName" stayed a single token
+ * and only raw substring comparison could match anything — which is how
+ * "LinkedAccountId" matched the template's "Count" (strip punctuation and
+ * "linkedaccountid" really does contain "count"). Tokenizing first makes that
+ * impossible while still matching the pairs that genuinely correspond.
+ */
 function tokens(name: string): string[] {
-  return name.toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length > 1);
+  return name
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean)
+    .map((t) => ABBREVIATIONS[t] ?? t)
+    .filter((t) => !IGNORED_TOKENS.has(t));
+}
+
+function isSubset(small: string[], large: Set<string>): boolean {
+  return small.length > 0 && small.every((t) => large.has(t));
 }
 
 /** 0 when the pair should not be considered a match at all. */
 function score(source: string, template: string): { confidence: number; method: MatchMethod } | null {
   if (source.trim() === template.trim()) return { confidence: 1, method: "exact" };
+  if (normalize(source) === normalize(template)) return { confidence: 0.98, method: "normalized" };
 
-  const a = normalize(source);
-  const b = normalize(template);
-  if (!a || !b) return null;
-  if (a === b) return { confidence: 0.98, method: "normalized" };
-  if (a.includes(b) || b.includes(a)) {
-    // Longer shared portion relative to the longer name = better containment.
-    const ratio = Math.min(a.length, b.length) / Math.max(a.length, b.length);
-    return { confidence: Number((0.6 + ratio * 0.3).toFixed(3)), method: "contains" };
+  const ta = tokens(source);
+  const tb = tokens(template);
+  if (ta.length === 0 || tb.length === 0) return null;
+  const sa = new Set(ta);
+  const sb = new Set(tb);
+
+  if (ta.length === tb.length && isSubset(ta, sb)) return { confidence: 0.95, method: "normalized" };
+
+  // Every token of one name appears in the other: "user: Cost Center" ->
+  // "Cost Center", "TotalCost" -> "Cost". Scaled by how much extra the longer
+  // name carries, so "Cost" alone is a weaker claim than a near-complete match.
+  if (isSubset(tb, sa) || isSubset(ta, sb)) {
+    const ratio = Math.min(ta.length, tb.length) / Math.max(ta.length, tb.length);
+    return { confidence: Number((0.62 + ratio * 0.28).toFixed(3)), method: "contains" };
   }
 
-  const ta = new Set(tokens(source));
-  const tb = tokens(template);
-  if (ta.size === 0 || tb.length === 0) return null;
-  const shared = tb.filter((t) => ta.has(t)).length;
+  const shared = [...sa].filter((t) => sb.has(t)).length;
   if (shared === 0) return null;
   const jaccard = shared / new Set([...ta, ...tb]).size;
-  // One shared token out of many is usually coincidence ("Name", "ID").
+  // A single shared token out of many is usually coincidence ("Name", "ID").
   if (jaccard < 0.34) return null;
   return { confidence: Number((0.4 + jaccard * 0.4).toFixed(3)), method: "token" };
 }
