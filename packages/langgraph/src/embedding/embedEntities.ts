@@ -1,5 +1,5 @@
 import path from "path";
-import { getDataset, getEmbeddableColumns, recordRun, updateDatasetStatus, upsertEntityEmbedding } from "@tbm/db";
+import { getDataset, getEmbeddableColumns, recordRun, updateDatasetStatus, upsertEntityEmbeddings } from "@tbm/db";
 import { embedTexts } from "./embedText";
 import { readWorkbookRows } from "../shared/readWorkbookRows";
 import { partitionPairedIdColumns } from "../shared/pairedIdColumns";
@@ -15,23 +15,28 @@ const MAX_DISTINCT_VALUES_PER_COLUMN = 500;
 async function getFullDistinctValuesByColumn(
   datasetId: string,
   columns: { id: string; column_name: string }[],
-  uploadsDir?: string
+  uploadsDir?: string,
+  suppliedRows?: Record<string, unknown>[]
 ): Promise<Map<string, string[]> | null> {
-  const dataset = await getDataset(datasetId);
-  if (!dataset) return null;
+  let rows = suppliedRows ?? null;
 
-  const candidatePaths = [dataset.storage_path];
-  if (uploadsDir) {
-    candidatePaths.push(path.join(uploadsDir, path.basename(dataset.storage_path)));
-  }
+  // Only touch the disk when the caller did not already parse this workbook.
+  if (!rows) {
+    const dataset = await getDataset(datasetId);
+    if (!dataset) return null;
 
-  let rows: Record<string, unknown>[] | null = null;
-  for (const candidate of candidatePaths) {
-    try {
-      rows = (await readWorkbookRows(candidate)).rows;
-      break;
-    } catch {
-      // try next candidate path, or fall through to null below
+    const candidatePaths = [dataset.storage_path];
+    if (uploadsDir) {
+      candidatePaths.push(path.join(uploadsDir, path.basename(dataset.storage_path)));
+    }
+
+    for (const candidate of candidatePaths) {
+      try {
+        rows = (await readWorkbookRows(candidate)).rows;
+        break;
+      } catch {
+        // try next candidate path, or fall through to null below
+      }
     }
   }
   if (!rows) return null;
@@ -62,7 +67,7 @@ export async function embedEntitiesNode(state: EmbeddingState): Promise<Partial<
   // Prefer re-reading the source file for full column cardinality; fall back
   // to the 5-value profiling sample (Stage 1) only if the file can't be read
   // (e.g. moved/deleted, or genuinely unreachable from this machine).
-  const fullValuesByColumn = await getFullDistinctValuesByColumn(state.datasetId, columns, state.uploadsDir);
+  const fullValuesByColumn = await getFullDistinctValuesByColumn(state.datasetId, columns, state.uploadsDir, state.rows);
 
   const pairs: { columnId: string; value: string }[] = [];
   for (const col of columns) {
@@ -82,15 +87,15 @@ export async function embedEntitiesNode(state: EmbeddingState): Promise<Partial<
 
   const { vectors, source } = await embedTexts(pairs.map((p) => p.value));
 
-  for (let i = 0; i < pairs.length; i++) {
-    await upsertEntityEmbedding({
+  await upsertEntityEmbeddings(
+    pairs.map((pair, i) => ({
       datasetId: state.datasetId,
-      columnId: pairs[i].columnId,
-      entityValue: pairs[i].value,
+      columnId: pair.columnId,
+      entityValue: pair.value,
       embedding: vectors[i],
       embeddingSource: source,
-    });
-  }
+    }))
+  );
 
   await updateDatasetStatus(state.datasetId, "embedded");
   await recordRun(state.datasetId, "embedding", "succeeded");

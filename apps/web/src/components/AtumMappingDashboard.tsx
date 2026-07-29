@@ -56,6 +56,7 @@ export function AtumMappingDashboard() {
         // no Stage 4 entity can never become a knowledge-graph edge.
         setRunDetails([
           `Mapped ${stats.mapped}/${stats.candidates} candidates.`,
+          stats.declaredMapped ? `${stats.declaredMapped} read straight from a declared column (no embedding, no retrieval).` : "",
           `${stats.linkedToContext} linked to a knowledge-graph entity.`,
           `${graph.edges} ATUM edges across ${graph.categories} categories.`,
           stats.fallbackDatasets.length ? `${stats.fallbackDatasets.length} dataset(s) mapped from stored embeddings (source file missing).` : "",

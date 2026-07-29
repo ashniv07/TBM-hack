@@ -9,6 +9,7 @@ import {
   listDatasets,
 } from "@tbm/db";
 import { readWorkbookRows } from "../shared/readWorkbookRows";
+import { findDeclaredColumn } from "./declaredCategory";
 
 export interface ContextualMappingInput {
   datasetId: string;
@@ -20,6 +21,14 @@ export interface ContextualMappingInput {
   /** Stage 4 entity this value resolved to, when the anchor column was embedded. */
   contextEntityId?: string;
   canonicalEntityName?: string;
+  /**
+   * The row's own stated classification for this layer (an `IT Resource Tower`
+   * or `Cost Pool` cell), when the dataset has such a column. Taken from the
+   * first row that produced this mapping — one business entity carries one
+   * tower in practice. mapToAtum resolves it against the taxonomy and skips
+   * retrieval entirely on a hit.
+   */
+  declaredValue?: string;
 }
 
 const MAX_CONTEXTS_PER_DATASET = 150;
@@ -106,8 +115,12 @@ export async function extractContextualMappingInputs(options: {
   }
 
   for (const dataset of datasets) {
-    const columns = (await getDatasetColumns(dataset.id)).filter((column) => isUsefulColumn(column, options.layer));
+    const allColumns = await getDatasetColumns(dataset.id);
+    const columns = allColumns.filter((column) => isUsefulColumn(column, options.layer));
     if (columns.length === 0) continue;
+    // Searched over every column, not the filtered set: "Cost Pool" carries no
+    // hint keyword and would otherwise be dropped before it could be read.
+    const declaredColumn = findDeclaredColumn(allColumns, options.layer);
     const candidatePaths = [dataset.storage_path];
     if (options.uploadsDir) {
       candidatePaths.push(path.join(options.uploadsDir, path.basename(dataset.storage_path)));
@@ -167,6 +180,7 @@ export async function extractContextualMappingInputs(options: {
 
       const context = Object.fromEntries(values.map(({ column, value }) => [column.column_name, value]));
       const primary = values[0];
+      const declaredValue = declaredColumn ? cellText(row[declaredColumn.column_name]) : "";
       const resolved = resolveEntity(primary.column.id, primary.value);
       const contextText = [
         dataset.source_type ? `Dataset type: ${dataset.source_type}` : "",
@@ -190,6 +204,7 @@ export async function extractContextualMappingInputs(options: {
         occurrences: 1,
         contextEntityId: resolved?.contextEntityId,
         canonicalEntityName: resolved?.canonicalName,
+        declaredValue: declaredValue || undefined,
       });
       if (grouped.size >= MAX_CONTEXTS_PER_DATASET) break;
     }

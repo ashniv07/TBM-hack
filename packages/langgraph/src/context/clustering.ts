@@ -1,16 +1,31 @@
-export function cosineDistance(a: number[], b: number[]): number {
+/**
+ * Converts an embedding to a unit vector once, so the clustering loop can use a
+ * plain dot product.
+ *
+ * The previous cosineDistance(a, b) recomputed BOTH vectors' norms on every
+ * call — for an n-value role that is O(n^2) x 3 x 1536 multiplies plus two
+ * square roots per pair. Normalizing up front is O(n), and makes each pair a
+ * single 1536-multiply dot product.
+ *
+ * Float32Array, not number[]: pgvector's `vector` type is already float4, so
+ * this loses no precision relative to what is stored, while roughly halving
+ * memory and giving the inner loop contiguous, unboxed values.
+ */
+export function toUnitVector(values: ArrayLike<number>): Float32Array {
+  const out = new Float32Array(values.length);
+  let norm = 0;
+  for (let i = 0; i < values.length; i++) norm += values[i] * values[i];
+  norm = Math.sqrt(norm) || 1;
+  for (let i = 0; i < values.length; i++) out[i] = values[i] / norm;
+  return out;
+}
+
+/** Cosine distance between two vectors already passed through toUnitVector. */
+export function unitCosineDistance(a: Float32Array, b: Float32Array): number {
   const len = Math.min(a.length, b.length);
   let dot = 0;
-  let normA = 0;
-  let normB = 0;
-  for (let i = 0; i < len; i++) {
-    dot += a[i] * b[i];
-    normA += a[i] * a[i];
-    normB += b[i] * b[i];
-  }
-  if (normA === 0 || normB === 0) return 1;
-  const similarity = dot / (Math.sqrt(normA) * Math.sqrt(normB));
-  return 1 - similarity;
+  for (let i = 0; i < len; i++) dot += a[i] * b[i];
+  return 1 - dot;
 }
 
 export class UnionFind {

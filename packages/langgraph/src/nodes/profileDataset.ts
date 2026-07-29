@@ -22,7 +22,15 @@ export async function profileDatasetNode(state: IngestionState): Promise<Partial
   const profile: ColumnProfile[] = headers.map((header, ordinal) => {
     const values = rows.map((r) => r[header]);
     const nullCount = values.filter((v) => v === null || v === undefined || v === "").length;
-    const distinctValues = new Set(values.map((v) => JSON.stringify(v)));
+    // Keyed by String(v) rather than JSON.stringify(v): on a 93k-row x 45-column
+    // workbook that is ~4.2M fewer serializations. Objects (formula/rich-text
+    // cells) still go through JSON.stringify, because String() collapses every
+    // one of them to "[object Object]" and would undercount distinct values.
+    const distinctValues = new Map<string, unknown>();
+    for (const v of values) {
+      const key = typeof v === "object" && v !== null ? JSON.stringify(v) : String(v);
+      if (!distinctValues.has(key)) distinctValues.set(key, v);
+    }
     const inferredType = inferType(values);
 
     const distinctCount = distinctValues.size;
@@ -35,9 +43,7 @@ export async function profileDatasetNode(state: IngestionState): Promise<Partial
       inferred_type: inferredType,
       null_pct: rows.length ? Number((nullCount / rows.length).toFixed(4)) : 0,
       distinct_count: distinctCount,
-      sample_values: Array.from(distinctValues)
-        .slice(0, 5)
-        .map((v) => JSON.parse(v)),
+      sample_values: Array.from(distinctValues.values()).slice(0, 5),
       is_candidate_key: isCandidateKey,
     };
   });

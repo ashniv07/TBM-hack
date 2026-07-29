@@ -6,13 +6,70 @@ const KNOWN_SOURCE_TYPES = [
   "AWS Billing",
   "Azure Billing",
   "GCP Billing",
+  "Cloud Billing",
   "CMDB",
   "Cost Center Master",
+  "Chart of Accounts",
   "Application Inventory",
+  "Business Service Catalog",
   "HR Systems",
   "Business Unit Mapping",
+  "Vendor Master",
+  "Resource Tower Master",
+  "Fixed Asset Register",
+  "Labor Master",
+  "Server Inventory",
+  "Storage Inventory",
+  "Network Inventory",
+  "End User Device Inventory",
+  "Data Center Inventory",
+  "Project Portfolio",
+  "ITSM Tickets",
   "Unknown",
 ] as const;
+
+// Deterministic file-name -> source type, applied AFTER classification and
+// overriding whatever the LLM or the keyword heuristic guessed. Same rationale
+// as DETERMINISTIC_ROLE_OVERRIDES in understanding/classifyColumns.ts: the LLM
+// is not reliable enough here, and it fails *confidently*. Observed live:
+// Servers_Master_Data classified "AWS Billing" at 95% (one row's Server ID
+// literally reads "Amazon Web Services, Inc. - Instance Hours"), and
+// IT_Resource_Towers_Master_Data classified "Application Inventory" at 90%.
+//
+// This is not cosmetic. Stage 5 derives one canonical schema per source_type,
+// so a wrong label pools unrelated datasets into a meaningless schema; and
+// Stage 6 puts "Dataset type: <source_type>" into the text it embeds for
+// taxonomy retrieval, so a wrong label actively steers the mapping.
+//
+// Matched against the lowercased file name, first hit wins — order matters:
+// "storage_devices" must be tested before "storage".
+const FILENAME_SOURCE_TYPES: [RegExp, (typeof KNOWN_SOURCE_TYPES)[number]][] = [
+  [/it_resource_tower|resource_tower/i, "Resource Tower Master"],
+  [/chart_of_accounts/i, "Chart of Accounts"],
+  [/cost_source/i, "General Ledger"],
+  [/fixed_asset/i, "Fixed Asset Register"],
+  [/labor/i, "Labor Master"],
+  [/vendor/i, "Vendor Master"],
+  [/cloud_service_provider|csp_/i, "Cloud Billing"],
+  [/storage_device/i, "CMDB"],
+  [/storage/i, "Storage Inventory"],
+  [/server|mainframe/i, "Server Inventory"],
+  [/network_device/i, "Network Inventory"],
+  [/end_user_device/i, "End User Device Inventory"],
+  [/data_center/i, "Data Center Inventory"],
+  [/project/i, "Project Portfolio"],
+  [/ticket/i, "ITSM Tickets"],
+  [/business_service/i, "Business Service Catalog"],
+  [/application/i, "Application Inventory"],
+  [/cost_center/i, "Cost Center Master"],
+];
+
+export function sourceTypeFromFileName(fileName: string): (typeof KNOWN_SOURCE_TYPES)[number] | null {
+  for (const [pattern, sourceType] of FILENAME_SOURCE_TYPES) {
+    if (pattern.test(fileName)) return sourceType;
+  }
+  return null;
+}
 
 const KEYWORD_HINTS: Record<string, string[]> = {
   "General Ledger": ["gl_account", "ledger", "journal", "debit", "credit"],
@@ -49,6 +106,10 @@ function heuristicClassify(headers: string[]): { sourceType: string; confidence:
 export async function inferSourceTypeNode(state: IngestionState): Promise<Partial<IngestionState>> {
   if (!state.sheet) return { error: "No sheet data to classify" };
   const { headers, rows } = state.sheet;
+
+  // A self-describing file name beats any inference, and skips an LLM call.
+  const declared = sourceTypeFromFileName(state.fileName);
+  if (declared) return { sourceType: declared, sourceTypeConfidence: 1 };
 
   if (!process.env.OPENAI_API_KEY) {
     const { sourceType, confidence } = heuristicClassify(headers);

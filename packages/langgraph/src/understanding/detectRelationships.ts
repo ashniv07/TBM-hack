@@ -1,21 +1,9 @@
 import { getDatasetColumns, getOtherDatasetColumns } from "@tbm/db";
 import { RelationshipCandidate, UnderstandingState } from "./state";
+import { nameSimilarity } from "../shared/nameSimilarity";
 
 const SKIP_ROLES = new Set(["cost_amount", "description", "other"]);
 const CONFIDENCE_THRESHOLD = 0.4;
-
-function normalize(name: string): string {
-  return name.toLowerCase().replace(/[^a-z0-9]/g, "");
-}
-
-function nameSimilarity(a: string, b: string): number {
-  const na = normalize(a);
-  const nb = normalize(b);
-  if (!na || !nb) return 0;
-  if (na === nb) return 1;
-  if (na.includes(nb) || nb.includes(na)) return 0.65;
-  return 0;
-}
 
 function valueOverlap(a: unknown[] | null, b: unknown[] | null): number {
   if (!a || !b || a.length === 0 || b.length === 0) return 0;

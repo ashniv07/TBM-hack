@@ -1,11 +1,5 @@
 import path from "path";
-import {
-  getDatasetColumns,
-  getContextEntitiesByType,
-  listDatasets,
-  getDataset,
-  ContextEntityRow,
-} from "@tbm/db";
+import { EMBEDDABLE_ROLES, getDatasetColumns, getContextEntitiesByType, listDatasets } from "@tbm/db";
 import { readWorkbookRows } from "../shared/readWorkbookRows";
 import { StandardizationState, DetectedIssue, DerivedSchema } from "./state";
 
@@ -14,12 +8,6 @@ const VALID_CURRENCIES = new Set([
   "USD", "EUR", "GBP", "JPY", "CNY", "INR", "CAD", "AUD", "CHF", "NZD",
   "HKD", "SGD", "KRW", "MXN", "BRL", "ZAR", "SEK", "NOK", "DKK", "PLN",
 ]);
-
-// Columns with semantic roles that should reference entities in the knowledge graph
-const REFERENCE_ROLES = [
-  "vendor", "application", "service", "business_unit", "department",
-  "cost_center", "cloud_resource", "cloud_provider", "infrastructure_asset", "project",
-];
 
 /**
  * Detects quality issues across all datasets.
@@ -208,7 +196,7 @@ export async function detectIssuesNode(state: StandardizationState): Promise<Par
         }
 
         // 6. Invalid reference detection (for entity reference columns)
-        if (col.semantic_role && REFERENCE_ROLES.includes(col.semantic_role)) {
+        if (col.semantic_role && (EMBEDDABLE_ROLES as readonly string[]).includes(col.semantic_role)) {
           const knownEntities = await getEntityNames(col.semantic_role);
           if (knownEntities.size > 0) {
             const unknownValues: string[] = [];

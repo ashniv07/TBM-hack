@@ -3,13 +3,14 @@ import { join } from "path";
 
 config({ path: join(__dirname, "..", "..", "..", ".env") });
 
-import express from "express";
+import express, { NextFunction, Request, Response } from "express";
 import cors from "cors";
 import { datasetsRouter } from "./routes/datasets";
 import { entitiesRouter } from "./routes/entities";
 import { contextRouter } from "./routes/context";
 import { standardizationRouter } from "./routes/standardization";
 import { atumRouter } from "./routes/atum";
+import { tbmRouter } from "./routes/tbm";
 import { tbmExportRouter } from "./routes/tbmExport";
 import { assistantRouter } from "./routes/assistant";
 import { analyticsRouter } from "./routes/analytics";
@@ -24,9 +25,18 @@ app.use("/api/entities", entitiesRouter);
 app.use("/api/context", contextRouter);
 app.use("/api/standardization", standardizationRouter);
 app.use("/api/atum", atumRouter);
+app.use("/api/tbm", tbmRouter);
 app.use("/api/tbm-export", tbmExportRouter);
 app.use("/api/assistant", assistantRouter);
 app.use("/api/analytics", analyticsRouter);
+
+// Registered after every route, as Express requires. Handlers wrapped in
+// `wrap()` (src/wrap.ts) forward rejections here instead of crashing the
+// process; handlers still using their own try/catch are unaffected.
+app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
+  console.error(err);
+  res.status(500).json({ error: err.message });
+});
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 4000;
 app.listen(PORT, () => {

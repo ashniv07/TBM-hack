@@ -2,6 +2,7 @@ import path from "path";
 import { DatasetColumn, getDataset, getDatasetColumns, getEmbeddableColumns } from "@tbm/db";
 import { readWorkbookRows } from "../shared/readWorkbookRows";
 import { partitionPairedIdColumns } from "../shared/pairedIdColumns";
+import { nameSimilarity } from "../shared/nameSimilarity";
 import { ContextState, DatasetNode, EntityAlias, GraphEdgeCandidate, ResolvedEntity } from "./state";
 
 // Business-relationship edge labels, checked in order: a column-name hint
@@ -50,24 +51,6 @@ export const ENTITY_TYPE_RELATIONSHIP_LABELS: Record<string, Record<string, stri
 // named here so both thresholds are visible and tunable in one place.
 const STRUCTURAL_OVERLAP_THRESHOLD = 0.6;
 const STRUCTURAL_UNIQUENESS_THRESHOLD = 0.9;
-
-function normalizeColumnName(name: string): string {
-  return name.toLowerCase().replace(/[^a-z0-9]/g, "");
-}
-
-// Same scoring shape as Stage 2's detectRelationships.ts (exact match = 1,
-// substring containment = 0.65, else 0) — duplicated rather than imported so
-// Stage 4's structural detection doesn't take on a dependency on Stage 2's
-// module, which reads only from the 5-value profiling sample and is a
-// different (coarser) signal than the real full-column comparison here.
-export function nameSimilarity(a: string, b: string): number {
-  const na = normalizeColumnName(a);
-  const nb = normalizeColumnName(b);
-  if (!na || !nb) return 0;
-  if (na === nb) return 1;
-  if (na.includes(nb) || nb.includes(na)) return 0.65;
-  return 0;
-}
 
 export interface StructuralKeyEvaluation {
   isMatch: boolean;

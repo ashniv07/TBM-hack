@@ -58,6 +58,18 @@ export interface UploadResult {
 
 const API_BASE = "/api";
 
+/**
+ * The API's error middleware responds with { error: "<real message>" }, but
+ * res.statusText is always the generic "Internal Server Error" — throwing that
+ * threw away every actual diagnosis. Read the body first, fall back to the
+ * status only when there is no body to read.
+ */
+async function failed(res: Response, fallback: string): Promise<Error> {
+  const body = await res.json().catch(() => null);
+  return new Error(body?.error ?? `${fallback}: ${res.statusText}`);
+}
+
+
 export async function uploadDatasets(files: File[]): Promise<UploadResult[]> {
   const formData = new FormData();
   files.forEach((f) => formData.append("files", f));
@@ -66,44 +78,44 @@ export async function uploadDatasets(files: File[]): Promise<UploadResult[]> {
     method: "POST",
     body: formData,
   });
-  if (!res.ok) throw new Error(`Upload failed: ${res.statusText}`);
+  if (!res.ok) throw await failed(res, "Upload failed");
   const data = await res.json();
   return data.results as UploadResult[];
 }
 
 export async function fetchDatasets(): Promise<Dataset[]> {
   const res = await fetch(`${API_BASE}/datasets`);
-  if (!res.ok) throw new Error(`Failed to fetch datasets: ${res.statusText}`);
+  if (!res.ok) throw await failed(res, "Failed to fetch datasets");
   const data = await res.json();
   return data.datasets as Dataset[];
 }
 
 export async function fetchDatasetDetail(id: string): Promise<{ dataset: Dataset; columns: DatasetColumn[] }> {
   const res = await fetch(`${API_BASE}/datasets/${id}`);
-  if (!res.ok) throw new Error(`Failed to fetch dataset: ${res.statusText}`);
+  if (!res.ok) throw await failed(res, "Failed to fetch dataset");
   return res.json();
 }
 
 export async function fetchRelationships(datasetId: string): Promise<DatasetRelationship[]> {
   const res = await fetch(`${API_BASE}/datasets/${datasetId}/relationships`);
-  if (!res.ok) throw new Error(`Failed to fetch relationships: ${res.statusText}`);
+  if (!res.ok) throw await failed(res, "Failed to fetch relationships");
   const data = await res.json();
   return data.relationships as DatasetRelationship[];
 }
 
 export async function rerunUnderstanding(datasetId: string): Promise<void> {
   const res = await fetch(`${API_BASE}/datasets/${datasetId}/understand`, { method: "POST" });
-  if (!res.ok) throw new Error(`Failed to run understanding: ${res.statusText}`);
+  if (!res.ok) throw await failed(res, "Failed to run understanding");
 }
 
 export async function rerunEmbedding(datasetId: string): Promise<void> {
   const res = await fetch(`${API_BASE}/datasets/${datasetId}/embed`, { method: "POST" });
-  if (!res.ok) throw new Error(`Failed to run embedding: ${res.statusText}`);
+  if (!res.ok) throw await failed(res, "Failed to run embedding");
 }
 
 export async function fetchSemanticMatches(): Promise<SemanticMatch[]> {
   const res = await fetch(`${API_BASE}/entities/matches`);
-  if (!res.ok) throw new Error(`Failed to fetch semantic matches: ${res.statusText}`);
+  if (!res.ok) throw await failed(res, "Failed to fetch semantic matches");
   const data = await res.json();
   return data.matches as SemanticMatch[];
 }
@@ -169,19 +181,19 @@ export interface ContextTraceResult {
 
 export async function rebuildContextModel(): Promise<ContextRebuildResult> {
   const res = await fetch(`${API_BASE}/context/rebuild`, { method: "POST" });
-  if (!res.ok) throw new Error(`Failed to rebuild context model: ${res.statusText}`);
+  if (!res.ok) throw await failed(res, "Failed to rebuild context model");
   return res.json();
 }
 
 export async function fetchContextGraph(): Promise<ContextGraphResponse> {
   const res = await fetch(`${API_BASE}/context/graph`);
-  if (!res.ok) throw new Error(`Failed to fetch context graph: ${res.statusText}`);
+  if (!res.ok) throw await failed(res, "Failed to fetch context graph");
   return res.json();
 }
 
 export async function fetchContextTrace(entityId: string, depth = 6): Promise<ContextTraceResult> {
   const res = await fetch(`${API_BASE}/context/entities/${entityId}/trace?depth=${depth}`);
-  if (!res.ok) throw new Error(`Failed to fetch trace: ${res.statusText}`);
+  if (!res.ok) throw await failed(res, "Failed to fetch trace");
   return res.json();
 }
 
@@ -283,18 +295,8 @@ export interface DataQualityReport {
 
 export async function runStandardization(): Promise<StandardizationRunResult> {
   const res = await fetch(`${API_BASE}/standardization/run`, { method: "POST" });
-  if (!res.ok) throw new Error(`Failed to run standardization: ${res.statusText}`);
+  if (!res.ok) throw await failed(res, "Failed to run standardization");
   return res.json();
-}
-
-export async function fetchCanonicalSchemas(sourceType?: string): Promise<CanonicalSchema[]> {
-  const url = sourceType
-    ? `${API_BASE}/standardization/schemas?sourceType=${encodeURIComponent(sourceType)}`
-    : `${API_BASE}/standardization/schemas`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Failed to fetch schemas: ${res.statusText}`);
-  const data = await res.json();
-  return data.schemas;
 }
 
 export async function fetchQualityIssues(filters?: {
@@ -309,7 +311,7 @@ export async function fetchQualityIssues(filters?: {
 
   const url = `${API_BASE}/standardization/issues${params.toString() ? `?${params}` : ""}`;
   const res = await fetch(url);
-  if (!res.ok) throw new Error(`Failed to fetch issues: ${res.statusText}`);
+  if (!res.ok) throw await failed(res, "Failed to fetch issues");
   const data = await res.json();
   return data.issues;
 }
@@ -320,7 +322,7 @@ export async function updateIssueStatus(id: string, status: string): Promise<Qua
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ status }),
   });
-  if (!res.ok) throw new Error(`Failed to update issue: ${res.statusText}`);
+  if (!res.ok) throw await failed(res, "Failed to update issue");
   const data = await res.json();
   return data.issue;
 }
@@ -335,21 +337,21 @@ export async function fetchCorrections(filters?: {
 
   const url = `${API_BASE}/standardization/corrections${params.toString() ? `?${params}` : ""}`;
   const res = await fetch(url);
-  if (!res.ok) throw new Error(`Failed to fetch corrections: ${res.statusText}`);
+  if (!res.ok) throw await failed(res, "Failed to fetch corrections");
   const data = await res.json();
   return data.corrections;
 }
 
 export async function approveCorrection(id: string): Promise<Correction> {
   const res = await fetch(`${API_BASE}/standardization/corrections/${id}/approve`, { method: "POST" });
-  if (!res.ok) throw new Error(`Failed to approve correction: ${res.statusText}`);
+  if (!res.ok) throw await failed(res, "Failed to approve correction");
   const data = await res.json();
   return data.correction;
 }
 
 export async function rejectCorrection(id: string): Promise<Correction> {
   const res = await fetch(`${API_BASE}/standardization/corrections/${id}/reject`, { method: "POST" });
-  if (!res.ok) throw new Error(`Failed to reject correction: ${res.statusText}`);
+  if (!res.ok) throw await failed(res, "Failed to reject correction");
   const data = await res.json();
   return data.correction;
 }
@@ -360,35 +362,21 @@ export async function bulkApproveCorrections(ids: string[]): Promise<number> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ids }),
   });
-  if (!res.ok) throw new Error(`Failed to bulk approve: ${res.statusText}`);
+  if (!res.ok) throw await failed(res, "Failed to bulk approve");
   const data = await res.json();
   return data.approved;
 }
 
-export async function applyCorrection(id: string): Promise<Correction> {
-  const res = await fetch(`${API_BASE}/standardization/corrections/${id}/apply`, { method: "POST" });
-  if (!res.ok) throw new Error(`Failed to apply correction: ${res.statusText}`);
-  const data = await res.json();
-  return data.correction;
-}
-
 export async function fetchReadinessScores(): Promise<ReadinessScore[]> {
   const res = await fetch(`${API_BASE}/standardization/readiness`);
-  if (!res.ok) throw new Error(`Failed to fetch readiness scores: ${res.statusText}`);
+  if (!res.ok) throw await failed(res, "Failed to fetch readiness scores");
   const data = await res.json();
   return data.scores;
 }
 
-export async function fetchReadinessScore(datasetId: string): Promise<ReadinessScore> {
-  const res = await fetch(`${API_BASE}/standardization/readiness/${datasetId}`);
-  if (!res.ok) throw new Error(`Failed to fetch readiness score: ${res.statusText}`);
-  const data = await res.json();
-  return data.score;
-}
-
 export async function fetchDataQualityReport(): Promise<DataQualityReport> {
   const res = await fetch(`${API_BASE}/standardization/report`);
-  if (!res.ok) throw new Error(`Failed to fetch report: ${res.statusText}`);
+  if (!res.ok) throw await failed(res, "Failed to fetch report");
   return res.json();
 }
 
@@ -438,13 +426,13 @@ export interface ProcessCorrectedResult {
 
 export async function applyCorrectionsToDataset(datasetId: string): Promise<ApplyCorrectionsResult> {
   const res = await fetch(`${API_BASE}/standardization/apply/${datasetId}`, { method: "POST" });
-  if (!res.ok) throw new Error(`Failed to apply corrections: ${res.statusText}`);
+  if (!res.ok) throw await failed(res, "Failed to apply corrections");
   return res.json();
 }
 
 export async function applyAllCorrections(): Promise<ApplyAllCorrectionsResult> {
   const res = await fetch(`${API_BASE}/standardization/apply-all`, { method: "POST" });
-  if (!res.ok) throw new Error(`Failed to apply all corrections: ${res.statusText}`);
+  if (!res.ok) throw await failed(res, "Failed to apply all corrections");
   return res.json();
 }
 
@@ -504,7 +492,8 @@ export async function runAtumMapping(layer: AtumLayer, useLlm = false) {
     ok: boolean;
     stats: {
       candidates: number; mapped: number; autoMapped: number; needsReview: number; unresolved: number;
-      skippedDatasets: string[]; fallbackDatasets: string[]; linkedToContext: number; embeddingSource: string;
+      skippedDatasets: string[]; fallbackDatasets: string[]; linkedToContext: number;
+      declaredMapped: number; embeddingSource: string;
     };
     graph: { edges: number; categories: number; mappings: number };
   }>;
@@ -834,3 +823,68 @@ export async function fetchDatasetAnalytics(): Promise<DatasetAnalytics[]> {
   if (!res.ok) throw new Error("Failed to fetch dataset analytics");
   return (await res.json()).datasets;
 }
+// ---------- Stage 7: TBM Data Model Generation ----------
+
+export interface TbmObject {
+  id: string;
+  name: string;
+  objectType: string;
+  resolutionConfidence: number;
+  aliasCount: number;
+  sourceDatasets: string[];
+  costPool: string | null;
+  resourceTower: string | null;
+  solution: string | null;
+  atumPaths: Partial<Record<AtumLayer, string>>;
+  atumConfidence: number | null;
+}
+
+export interface TbmRelationship {
+  fromId: string; fromName: string; fromType: string;
+  relationship: string;
+  toId: string; toName: string; toType: string;
+  confidence: number;
+  evidenceDataset: string | null;
+}
+
+export interface TbmCostFact {
+  datasetFile: string; sourceType: string | null;
+  costCenter: string; account: string; costPool: string; costSubPool: string;
+  resourceTower: string; resourceSubTower: string;
+  vendor: string; project: string; expenseType: string; period: string;
+  amount: number; lineCount: number;
+}
+
+export interface TbmSourceDataset {
+  datasetId: string; fileName: string; sourceType: string | null; rowCount: number | null;
+  businessPurpose: string | null;
+  readinessScore: number | null; issueCount: number | null; criticalIssueCount: number | null;
+  tbmReady: boolean;
+}
+
+export interface TbmDataModel {
+  generatedAt: string;
+  taxonomyVersion: string;
+  summary: {
+    objects: number; classifiedObjects: number; classificationCoverage: number;
+    relationships: number; sourceDatasets: number; tbmReadyDatasets: number;
+    averageReadiness: number; averageMappingConfidence: number;
+    objectsByType: Record<string, number>; objectsByTower: Record<string, number>;
+    totalCost: number; costFactRows: number;
+    costByPool: Record<string, number>; costByTower: Record<string, number>;
+  };
+  objects: TbmObject[];
+  relationships: TbmRelationship[];
+  costFacts: TbmCostFact[];
+  sourceDatasets: TbmSourceDataset[];
+  warnings: string[];
+}
+
+export async function fetchTbmModel(): Promise<TbmDataModel> {
+  const res = await fetch(`${API_BASE}/tbm/model`);
+  if (!res.ok) throw new Error((await res.json()).error ?? "Failed to build TBM data model");
+  return res.json();
+}
+
+/** The workbook is a plain GET, so the browser can download it directly. */
+export const TBM_EXPORT_URL = `${API_BASE}/tbm/export.xlsx`;

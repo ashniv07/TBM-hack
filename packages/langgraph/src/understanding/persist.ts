@@ -1,4 +1,4 @@
-import { insertRelationship, recordRun, setDatasetBusinessPurpose, updateColumnUnderstanding, updateDatasetStatus } from "@tbm/db";
+import { insertRelationships, recordRun, setDatasetBusinessPurpose, updateColumnUnderstandings, updateDatasetStatus } from "@tbm/db";
 import { UnderstandingState } from "./state";
 
 export async function persistClassificationsNode(state: UnderstandingState): Promise<Partial<UnderstandingState>> {
@@ -8,14 +8,7 @@ export async function persistClassificationsNode(state: UnderstandingState): Pro
 
   await recordRun(state.datasetId, "understanding", "running");
   await setDatasetBusinessPurpose(state.datasetId, state.businessPurpose);
-
-  for (const c of state.classifications) {
-    await updateColumnUnderstanding(c.columnId, {
-      semanticRole: c.semanticRole,
-      semanticRoleConfidence: c.semanticRoleConfidence,
-      isTechnical: c.isTechnical,
-    });
-  }
+  await updateColumnUnderstandings(state.classifications);
 
   return {};
 }
@@ -23,16 +16,7 @@ export async function persistClassificationsNode(state: UnderstandingState): Pro
 export async function persistRelationshipsNode(state: UnderstandingState): Promise<Partial<UnderstandingState>> {
   if (state.error) return {};
 
-  for (const r of state.relationships ?? []) {
-    await insertRelationship({
-      fromColumnId: r.fromColumnId,
-      toColumnId: r.toColumnId,
-      relationshipType: r.relationshipType,
-      confidence: r.confidence,
-      reasoning: r.reasoning,
-    });
-  }
-
+  await insertRelationships(state.relationships ?? []);
   await updateDatasetStatus(state.datasetId, "understood");
   await recordRun(state.datasetId, "understanding", "succeeded");
 

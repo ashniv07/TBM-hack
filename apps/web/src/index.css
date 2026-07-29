@@ -366,3 +366,161 @@ body {
 .font-heading  { font-family: var(--font-heading); }
 .normal-case   { text-transform: none; letter-spacing: normal; }
 .btn .spinner  { width: 11px; height: 11px; border-width: 1.5px; }
+.severity-badge.severity-info {
+  background: #22303f;
+  color: #6fb8ef;
+}
+
+.status-badge.status-open {
+  color: #e0c460;
+}
+
+.status-badge.status-acknowledged {
+  color: #6fb8ef;
+}
+
+.status-badge.status-resolved {
+  color: #6fd694;
+}
+
+.status-badge.status-ignored {
+  color: #9aa2ad;
+}
+
+.correction-status-pending {
+  color: #e0c460;
+}
+
+.correction-status-approved {
+  color: #6fd694;
+}
+
+.correction-status-rejected {
+  color: #ef6f6f;
+}
+
+.correction-status-applied {
+  color: #6fb8ef;
+}
+
+.issue-title {
+  font-weight: 500;
+  margin-bottom: 0.25rem;
+}
+
+.issue-desc {
+  margin-bottom: 0.25rem;
+}
+
+.issue-fix {
+  font-size: 0.8rem;
+  color: #6fd694;
+}
+
+.correction-type {
+  background: #1e2a3f;
+  color: #7fb0f5;
+  padding: 0.1rem 0.45rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  text-transform: capitalize;
+}
+
+.critical-badge {
+  color: #ef6f6f;
+  font-size: 0.8rem;
+}
+
+.dq-issues td button,
+.dq-corrections td button {
+  background: #262a33;
+  font-size: 0.8rem;
+  padding: 0.25rem 0.5rem;
+  margin-right: 0.35rem;
+}
+
+.dq-issues td button:hover:not(:disabled),
+.dq-corrections td button:hover:not(:disabled) {
+  background: #323744;
+}
+
+code {
+  background: #1a1d24;
+  padding: 0.1rem 0.3rem;
+  border-radius: 3px;
+  font-size: 0.85rem;
+}
+
+.apply-btn {
+  background: #2a5f2a !important;
+  color: #6fd694 !important;
+}
+
+.apply-btn:hover:not(:disabled) {
+  background: #3a7f3a !important;
+}
+
+.dq-apply-result {
+  background: #14271d;
+  border: 1px solid #2a5f2a;
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+
+.dq-apply-result.partial {
+  border-color: #e0c460;
+}
+
+.dq-apply-result h4 {
+  margin-top: 0;
+  color: #6fd694;
+}
+
+.apply-result-item {
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid #262a33;
+}
+
+.apply-result-item:last-child {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.change-list {
+  margin: 0.5rem 0 0 1rem;
+  padding: 0;
+  list-style: disc;
+  font-size: 0.85rem;
+}
+
+.change-list li {
+  margin-bottom: 0.25rem;
+}
+
+.apply-errors {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #ef6f6f;
+  color: #ef6f6f;
+}
+
+.apply-errors ul {
+  margin: 0.5rem 0 0 1rem;
+  padding: 0;
+}
+
+/* ---------- Stage 7: TBM Data Model ---------- */
+.tbm-actions, .tbm-tabs { display: flex; flex-wrap: wrap; gap: .75rem; align-items: center; margin: 1rem 0; }
+.tbm-tabs select { background: #1a1d24; color: #e6e8eb; border: 1px solid #3a3f4b; border-radius: 4px; padding: .4rem; }
+.tbm-tabs button.secondary { background: #262a33; }
+.tbm-download {
+  background: #2f6f4f; color: #e6e8eb; border-radius: 5px; padding: .45rem .8rem;
+  text-decoration: none; font-size: .85rem;
+}
+.tbm-download.disabled { background: #262a33; color: #6b7280; pointer-events: none; }
+.tbm-stamp { color: #9aa2ad; font-size: .8rem; }
+.tbm-warnings { margin: .5rem 0 1rem; padding-left: 1.2rem; color: #d69b6f; font-size: .85rem; }
+.tbm-warnings li { margin: .3rem 0; }

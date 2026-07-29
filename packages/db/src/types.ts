@@ -81,7 +81,7 @@ export interface RawEntityEmbeddingRow {
   dataset_id: string;
   column_id: string;
   entity_value: string;
-  embedding: number[];
+  embedding: Float32Array;
   embedding_source: string;
   semantic_role: string;
   column_name: string;
@@ -281,6 +281,24 @@ export interface AtumMapping {
   reviewed_at: string | null;
   created_at: string;
   updated_at: string;
+}
+
+// One approved/overridden mapping resolved to the Stage 4 entity it classifies.
+// Stage 6 uses the first four fields to draw a graph edge; Stage 7 uses the
+// rest to place the entity in the exported TBM data model.
+export interface AtumEntityClassification {
+  mapping_id: string;
+  context_entity_id: string;
+  category_path: string;
+  confidence: number;
+  layer: AtumLayer;
+  status: AtumMappingStatus;
+  method: string;
+  source_value: string;
+  level_1: string;
+  level_2: string | null;
+  level_3: string | null;
+  dataset_file_name: string;
 }
 
 export interface AtumMappingView extends AtumMapping {
