@@ -4,19 +4,17 @@ import { ImportPhase } from "./components/pipeline/ImportPhase";
 import { RelationshipsPhase } from "./components/pipeline/RelationshipsPhase";
 import { DataQualityPhase } from "./components/pipeline/DataQualityPhase";
 import { AtumPhase } from "./components/pipeline/AtumPhase";
-import { ExportPhase } from "./components/pipeline/ExportPhase";
 import { DashboardTab } from "./components/DashboardTab";
 import { DukeAI } from "./components/DukeAI";
 
 type MainTab = "pipeline" | "dashboard";
-type PipelinePhase = "import" | "relationships" | "quality" | "atum" | "export";
+type PipelinePhase = "import" | "relationships" | "quality" | "atum";
 
 const PHASES: { id: PipelinePhase; label: string; n: number }[] = [
   { id: "import",        label: "Import Data",   n: 1 },
   { id: "relationships", label: "Relationships", n: 2 },
   { id: "quality",       label: "Data Quality",  n: 3 },
-  { id: "atum",          label: "ATUM Mapping",  n: 4 },
-  { id: "export",        label: "Export",        n: 5 },
+  { id: "atum",          label: "ATUM & Export", n: 4 },
 ];
 
 export default function App() {
@@ -38,8 +36,7 @@ export default function App() {
       import:        "Import Data — uploading and cataloging datasets",
       relationships: "Template Mapping — source columns matched to the Apptio master template, plus unmatched-column gaps",
       quality:       "Data Quality & Standardization — issues, corrections, readiness",
-      atum:          "ATUM Mapping — TBM taxonomy classification review",
-      export:        "TBM Export — Apptio-ready data model export",
+      atum:          "ATUM Mapping & Export — TBM taxonomy classification review and Apptio-ready data model export",
     };
     setDukeContext(
       activeTab === "dashboard"
@@ -99,7 +96,6 @@ export default function App() {
             {activePhase === "relationships" && <RelationshipsPhase datasets={datasets} />}
             {activePhase === "quality"       && <DataQualityPhase   datasets={datasets} onDatasetsChanged={refreshDatasets} />}
             {activePhase === "atum"          && <AtumPhase />}
-            {activePhase === "export"        && <ExportPhase />}
           </>
         )}
         {activeTab === "dashboard" && <DashboardTab />}

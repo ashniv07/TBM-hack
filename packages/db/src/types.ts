@@ -24,6 +24,8 @@ export interface Dataset {
   template_coverage: number | null;
   template_expected_count: number | null;
   template_matched_count: number | null;
+  /** Path to refined dataset with only mapped columns (output of Relationship phase). */
+  refined_path: string | null;
   uploaded_at: string;
   updated_at: string;
 }
@@ -288,6 +290,12 @@ export interface AtumTaxonomyItem {
   embedding_source: string | null;
 }
 
+export interface AtumAlternative {
+  categoryId: string;
+  path: string;
+  confidence: number;
+}
+
 export interface AtumMapping {
   id: string;
   dataset_id: string;
@@ -302,7 +310,7 @@ export interface AtumMapping {
   method: string;
   reasoning: string | null;
   evidence: Record<string, unknown> | null;
-  alternatives: unknown[] | null;
+  alternatives: AtumAlternative[] | null;
   reviewed_by: string | null;
   reviewed_at: string | null;
   created_at: string;

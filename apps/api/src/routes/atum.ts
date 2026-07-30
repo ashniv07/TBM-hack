@@ -60,6 +60,83 @@ atumRouter.post("/mappings/:id/approve", wrap(async (req, res) => {
   res.json({ mapping, linkedToGraph: graph.edges > 0 });
 }));
 
+// Bulk approve multiple mappings at once
+atumRouter.post("/mappings/bulk-approve", wrap(async (req, res) => {
+  const { ids, reviewedBy } = req.body;
+  if (!Array.isArray(ids) || ids.length === 0) {
+    return res.status(400).json({ error: "ids must be a non-empty array" });
+  }
+  const results: { id: string; success: boolean; linkedToGraph?: boolean }[] = [];
+  for (const id of ids) {
+    try {
+      const mapping = await reviewAtumMapping({ id, status: "approved", reviewedBy });
+      if (mapping) {
+        const graph = await syncAtumEdgesToGraph({ mappingId: mapping.id });
+        results.push({ id, success: true, linkedToGraph: graph.edges > 0 });
+      } else {
+        results.push({ id, success: false });
+      }
+    } catch {
+      results.push({ id, success: false });
+    }
+  }
+  res.json({
+    ok: true,
+    approved: results.filter(r => r.success).length,
+    results
+  });
+}));
+
+// Bulk accept suggestions - applies best alternative to all unresolved/uncategorized mappings
+atumRouter.post("/mappings/bulk-accept-suggestions", wrap(async (req, res) => {
+  const { layer, minConfidence = 0, reviewedBy } = req.body;
+  const mappings = await listAtumMappings({ layer });
+
+  // Find mappings that have no category but have alternatives
+  const needsSuggestion = mappings.filter(m =>
+    !m.category_id && m.alternatives && m.alternatives.length > 0
+  );
+
+  const results: { id: string; sourceValue: string; success: boolean; categoryPath?: string }[] = [];
+
+  for (const mapping of needsSuggestion) {
+    const best = mapping.alternatives![0];
+    if (best.confidence < minConfidence) {
+      results.push({ id: mapping.id, sourceValue: mapping.source_value, success: false });
+      continue;
+    }
+
+    try {
+      const updated = await reviewAtumMapping({
+        id: mapping.id,
+        status: "overridden",
+        categoryId: best.categoryId,
+        reviewedBy: reviewedBy ?? "bulk-suggestion",
+      });
+      if (updated) {
+        await syncAtumEdgesToGraph({ mappingId: updated.id });
+        results.push({
+          id: mapping.id,
+          sourceValue: mapping.source_value,
+          success: true,
+          categoryPath: best.path
+        });
+      } else {
+        results.push({ id: mapping.id, sourceValue: mapping.source_value, success: false });
+      }
+    } catch {
+      results.push({ id: mapping.id, sourceValue: mapping.source_value, success: false });
+    }
+  }
+
+  res.json({
+    ok: true,
+    applied: results.filter(r => r.success).length,
+    total: needsSuggestion.length,
+    results
+  });
+}));
+
 atumRouter.post("/mappings/:id/reject", wrap(async (req, res) => {
   const mapping = await reviewAtumMapping({ id: req.params.id, status: "rejected", reviewedBy: req.body?.reviewedBy });
   if (!mapping) return res.status(404).json({ error: "Mapping not found" });

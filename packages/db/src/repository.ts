@@ -92,6 +92,18 @@ export async function setDatasetSourceType(id: string, sourceType: string, confi
   );
 }
 
+/**
+ * Updates the refined_path field for a dataset.
+ * The refined path points to an Excel file containing only mapped columns
+ * with template column names (output of the Relationship phase).
+ */
+export async function updateDatasetRefinedPath(id: string, refinedPath: string) {
+  await getPool().query(
+    `update datasets set refined_path = $2, updated_at = now() where id = $1`,
+    [id, refinedPath]
+  );
+}
+
 export async function insertColumns(datasetId: string, columns: Omit<DatasetColumn, "id" | "dataset_id">[]) {
   for (const batch of chunk(columns, WRITE_BATCH_SIZE)) {
     const params: unknown[] = [];
@@ -751,6 +763,18 @@ export async function insertQualityIssue(input: {
     ]
   );
   return rows[0];
+}
+
+export async function getQualityIssue(id: string): Promise<QualityIssueView | null> {
+  const { rows } = await getPool().query<QualityIssueView>(
+    `select qi.*, d.file_name as dataset_file_name, dc.column_name
+     from quality_issues qi
+     join datasets d on d.id = qi.dataset_id
+     left join dataset_columns dc on dc.id = qi.column_id
+     where qi.id = $1`,
+    [id]
+  );
+  return rows[0] ?? null;
 }
 
 export async function getQualityIssues(filters?: {

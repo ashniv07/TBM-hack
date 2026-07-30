@@ -1,6 +1,7 @@
 import ExcelJS from "exceljs";
 import path from "path";
 import {
+  AtumMappingView,
   ColumnMapping,
   getColumnMappings,
   getDataset,
@@ -29,7 +30,7 @@ import { findMasterTemplate } from "../templates/masterTemplates";
  *                      for. Carried here rather than dropped, since they are
  *                      often where a missing mapping is hiding.
  *   Data Quality       issues found against this dataset.
- *   ATUM <layer>       one sheet per ATUM layer that produced classifications.
+ *   ATUM <layer>       one sheet per ATUM layer with APPROVED classifications only.
  *   Summary            coverage and counts.
  */
 
@@ -68,35 +69,99 @@ export async function buildRefinedWorkbook(
   workbook.creator = "TBM Data Trust & Intelligence Platform";
   workbook.created = new Date();
 
+  // Filter to only approved ATUM mappings for the export
+  const approvedMappings = atumMappings.filter((m) => m.status === "approved" || m.status === "overridden");
+
+  // Build ATUM lookup by value (case-insensitive) for cost_pool layer
+  // Maps source values to their ATUM classification (level_1 = Cost Pool, level_2 = Cost Sub Pool)
+  const costPoolLookup = new Map<string, { l1: string; l2: string; l3: string }>();
+  for (const m of approvedMappings) {
+    if (!m.category_id || m.layer !== "cost_pool") continue;
+    const valueKey = m.source_value.toLowerCase();
+    costPoolLookup.set(valueKey, {
+      l1: m.level_1 ?? "",
+      l2: m.level_2 ?? "",
+      l3: m.level_3 ?? "",
+    });
+  }
+
+  // Build ATUM lookup for resource_tower layer
+  const resourceTowerLookup = new Map<string, { l1: string; l2: string; l3: string }>();
+  for (const m of approvedMappings) {
+    if (!m.category_id || m.layer !== "resource_tower") continue;
+    const valueKey = m.source_value.toLowerCase();
+    resourceTowerLookup.set(valueKey, {
+      l1: m.level_1 ?? "",
+      l2: m.level_2 ?? "",
+      l3: m.level_3 ?? "",
+    });
+  }
+
   // ---- The refined data itself ----
   let rowsExported = 0;
   if (template) {
     // template column -> the source column that satisfies it
     const sourceFor = new Map<string, string>();
     for (const m of mappings) {
-      // Unreviewed LLM suggestions are deliberately NOT used to place data: they
-      // were measured wrong more often than right on real input. They appear in
-      // the Column Mapping sheet for review, and count only once accepted (which
-      // records them as a manual override).
       if (m.template_column && (m.method !== "llm" || m.is_override)) {
         sourceFor.set(m.template_column, m.source_column);
       }
     }
 
     const sheet = workbook.addWorksheet(sheetName(template.masterType));
+    // Use only template columns (ATUM will update Cost Pool / Cost Sub Pool directly)
     sheet.columns = template.expectedColumns.map((c) => ({ header: c, key: c, width: 22 }));
     header(sheet);
 
-    const rows = await loadRows(dataset.storage_path, options?.uploadsDir);
-    if (rows) {
-      for (const row of rows) {
+    // Load refined file for template columns
+    const refinedRows = await loadRows(dataset, options?.uploadsDir);
+
+    // Also load source file for ATUM lookups (ATUM mappings use original source values)
+    const sourceRows = await loadSourceRows(dataset.storage_path, options?.uploadsDir);
+
+    if (refinedRows) {
+      for (let i = 0; i < refinedRows.length; i++) {
+        const row = refinedRows[i];
+        const sourceRow = sourceRows?.[i] ?? row; // Fall back to refined row if source unavailable
+
         const out: Record<string, unknown> = {};
         for (const templateColumn of template.expectedColumns) {
-          const source = sourceFor.get(templateColumn);
-          // Unsupplied template columns stay present and empty: the workbook
-          // must have the shape Apptio expects.
-          out[templateColumn] = source ? row[source] ?? null : null;
+          // In refined file, columns are already named with template names
+          // In source file, we need to map source -> template
+          const sourceCol = sourceFor.get(templateColumn);
+          // Try template column name first (for refined file), then source column name
+          out[templateColumn] = row[templateColumn] ?? (sourceCol ? row[sourceCol] : null) ?? null;
         }
+
+        // Apply ATUM Cost Pool mapping: update "Cost Pool" and "Cost Sub Pool" columns
+        // by looking up any cell value in the source row against approved ATUM mappings
+        if (costPoolLookup.size > 0) {
+          for (const cellValue of Object.values(sourceRow)) {
+            if (cellValue == null || cellValue === "") continue;
+            const match = costPoolLookup.get(String(cellValue).toLowerCase());
+            if (match) {
+              // Override Cost Pool with ATUM level 1, Cost Sub Pool with ATUM level 2
+              if (match.l1) out["Cost Pool"] = match.l1;
+              if (match.l2) out["Cost Sub Pool"] = match.l2;
+              break; // Use first match found
+            }
+          }
+        }
+
+        // Apply ATUM Resource Tower mapping: update "IT Resource Tower" and "IT Resource Sub Tower" columns
+        if (resourceTowerLookup.size > 0) {
+          for (const cellValue of Object.values(sourceRow)) {
+            if (cellValue == null || cellValue === "") continue;
+            const match = resourceTowerLookup.get(String(cellValue).toLowerCase());
+            if (match) {
+              // Override Resource Tower columns with ATUM values
+              if (match.l1) out["IT Resource Tower"] = match.l1;
+              if (match.l2) out["IT Resource Sub Tower"] = match.l2;
+              break; // Use first match found
+            }
+          }
+        }
+
         sheet.addRow(out);
         rowsExported++;
       }
@@ -144,9 +209,9 @@ export async function buildRefinedWorkbook(
     }))
   );
 
-  // ---- ATUM, one sheet per layer that produced anything ----
-  const byLayer = new Map<string, typeof atumMappings>();
-  for (const m of atumMappings) {
+  // ---- ATUM sheets - ONLY approved/overridden mappings ----
+  const byLayer = new Map<string, AtumMappingView[]>();
+  for (const m of approvedMappings) {
     if (!m.category_id) continue;
     byLayer.set(m.layer, [...(byLayer.get(m.layer) ?? []), m]);
   }
@@ -184,7 +249,8 @@ export async function buildRefinedWorkbook(
       { metric: "Source columns with no template place", value: mappings.filter((m) => !m.template_column).length },
       { metric: "Rows exported", value: rowsExported },
       { metric: "Quality issues", value: issues.length },
-      { metric: "ATUM classifications", value: atumMappings.filter((m) => m.category_id).length },
+      { metric: "ATUM approved classifications", value: approvedMappings.filter((m) => m.category_id).length },
+      { metric: "ATUM total classifications", value: atumMappings.filter((m) => m.category_id).length },
       { metric: "Generated", value: new Date().toISOString() },
     ]
   );
@@ -212,9 +278,32 @@ function addTable(
   return sheet;
 }
 
-async function loadRows(storagePath: string, uploadsDir?: string) {
-  const candidates = [storagePath];
+async function loadRows(dataset: { refined_path: string | null; storage_path: string }, uploadsDir?: string) {
+  // Prefer refined file (only mapped columns with template column names)
+  const candidates: string[] = [];
+  if (dataset.refined_path) {
+    candidates.push(dataset.refined_path);
+    if (uploadsDir) candidates.push(path.join(uploadsDir, path.basename(dataset.refined_path)));
+  }
+  // Fall back to source file
+  candidates.push(dataset.storage_path);
+  if (uploadsDir) candidates.push(path.join(uploadsDir, path.basename(dataset.storage_path)));
+
+  for (const candidate of candidates) {
+    try {
+      return (await readWorkbookRows(candidate)).rows;
+    } catch {
+      // try the next candidate
+    }
+  }
+  return null;
+}
+
+async function loadSourceRows(storagePath: string, uploadsDir?: string) {
+  // Load directly from source file (for ATUM lookups which use original values)
+  const candidates: string[] = [storagePath];
   if (uploadsDir) candidates.push(path.join(uploadsDir, path.basename(storagePath)));
+
   for (const candidate of candidates) {
     try {
       return (await readWorkbookRows(candidate)).rows;

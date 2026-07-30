@@ -165,6 +165,8 @@ body {
 .btn-approve:hover:not(:disabled) { background: var(--success); color: #000; }
 .btn-reject { background: var(--danger-bg); color: var(--danger-text); border: 1px solid var(--magenta); }
 .btn-reject:hover:not(:disabled) { background: var(--magenta); color: #fff; }
+.btn-warning { background: rgba(255, 180, 50, 0.15); color: #ffb432; border: 1px solid #ffb432; }
+.btn-warning:hover:not(:disabled) { background: #ffb432; color: #000; }
 .btn-sm { height: 28px; padding: 0 10px; font-size: 10px; }
 
 .stat-chips { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -524,3 +526,37 @@ code {
 .tbm-stamp { color: #9aa2ad; font-size: .8rem; }
 .tbm-warnings { margin: .5rem 0 1rem; padding-left: 1.2rem; color: #d69b6f; font-size: .85rem; }
 .tbm-warnings li { margin: .3rem 0; }
+
+/* ---------- Modal Overlay ---------- */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.75);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  backdrop-filter: blur(4px);
+}
+
+.modal-content {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 24px;
+  max-width: 500px;
+  width: 90%;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+}
+
+.modal-content h3 {
+  color: var(--text-primary);
+  font-family: var(--font-heading);
+}
+
+.modal-content p {
+  color: var(--text-muted);
+}

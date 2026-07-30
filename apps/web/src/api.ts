@@ -8,6 +8,8 @@ export interface Dataset {
   row_count: number | null;
   business_purpose: string | null;
   uploaded_at: string;
+  master_type: string | null;
+  refined_path: string | null;
 }
 
 export interface DatasetColumn {
@@ -447,6 +449,73 @@ export async function processCorrectedDataset(datasetId: string): Promise<Proces
   return res.json();
 }
 
+// Acknowledge an issue and apply AI fix automatically
+export interface AcknowledgeIssueResult {
+  ok: boolean;
+  issue: QualityIssue;
+  corrections: Correction[];
+  message: string;
+}
+
+export async function acknowledgeIssue(issueId: string): Promise<AcknowledgeIssueResult> {
+  const res = await fetch(`${API_BASE}/standardization/issues/${issueId}/acknowledge`, { method: "POST" });
+  if (!res.ok) throw await failed(res, "Failed to acknowledge issue");
+  return res.json();
+}
+
+// Reject an issue (mark as ignored)
+export async function rejectIssue(issueId: string): Promise<{ ok: boolean; issue: QualityIssue }> {
+  const res = await fetch(`${API_BASE}/standardization/issues/${issueId}/reject`, { method: "POST" });
+  if (!res.ok) throw await failed(res, "Failed to reject issue");
+  return res.json();
+}
+
+// Preview corrections grouped by dataset
+export interface PreviewChange {
+  original: string;
+  corrected: string;
+  type: string;
+  confidence: number;
+  reasoning?: string;
+}
+
+export interface PreviewColumn {
+  columnName: string;
+  changes: PreviewChange[];
+}
+
+export interface PreviewDataset {
+  datasetId: string;
+  fileName: string;
+  columns: PreviewColumn[];
+  totalChanges: number;
+}
+
+export interface PreviewResult {
+  datasets: PreviewDataset[];
+  totalDatasets: number;
+  totalChanges: number;
+}
+
+export async function fetchStandardizationPreview(datasetId?: string): Promise<PreviewResult> {
+  const url = datasetId
+    ? `${API_BASE}/standardization/preview?datasetId=${datasetId}`
+    : `${API_BASE}/standardization/preview`;
+  const res = await fetch(url);
+  if (!res.ok) throw await failed(res, "Failed to fetch preview");
+  return res.json();
+}
+
+// Export URLs
+export const standardizationExportUrl = (datasetId: string) =>
+  `${API_BASE}/standardization/export/${datasetId}`;
+
+export const standardizationExportAllUrl = () =>
+  `${API_BASE}/standardization/export-all`;
+
+export const downloadCorrectedDatasetUrl = (datasetId: string) =>
+  `${API_BASE}/standardization/download-corrected/${datasetId}`;
+
 // ---------- Stage 6: ATUM Mapping ----------
 
 export type AtumLayer = "cost_pool" | "resource_tower" | "solution";
@@ -531,6 +600,26 @@ export async function reviewAtumMapping(id: string, action: "approve" | "reject"
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ categoryId }),
   });
   if (!res.ok) throw new Error("Failed to review ATUM mapping");
+  return res.json();
+}
+
+export async function bulkApproveAtumMappings(ids: string[]): Promise<{ ok: boolean; approved: number }> {
+  const res = await fetch(`${API_BASE}/atum/mappings/bulk-approve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids }),
+  });
+  if (!res.ok) throw new Error("Failed to bulk approve ATUM mappings");
+  return res.json();
+}
+
+export async function bulkAcceptAtumSuggestions(layer?: AtumLayer): Promise<{ ok: boolean; applied: number; total: number }> {
+  const res = await fetch(`${API_BASE}/atum/mappings/bulk-accept-suggestions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ layer }),
+  });
+  if (!res.ok) throw new Error("Failed to accept ATUM suggestions");
   return res.json();
 }
 

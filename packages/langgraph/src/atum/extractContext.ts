@@ -151,7 +151,18 @@ export async function extractContextualMappingInputs(options: {
     // Searched over every column, not the filtered set: "Cost Pool" carries no
     // hint keyword and would otherwise be dropped before it could be read.
     const declaredColumn = findDeclaredColumn(allColumns, options.layer);
-    const candidatePaths = [dataset.storage_path];
+
+    // Prefer the refined dataset (output from Data Quality phase) if available,
+    // as it contains only mapped columns with template names
+    const candidatePaths: string[] = [];
+    if (dataset.refined_path) {
+      candidatePaths.push(dataset.refined_path);
+      if (options.uploadsDir) {
+        candidatePaths.push(path.join(options.uploadsDir, path.basename(dataset.refined_path)));
+      }
+    }
+    // Fall back to original source file
+    candidatePaths.push(dataset.storage_path);
     if (options.uploadsDir) {
       candidatePaths.push(path.join(options.uploadsDir, path.basename(dataset.storage_path)));
       // A shared database may contain the timestamped storage path produced

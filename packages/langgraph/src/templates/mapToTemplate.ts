@@ -1,7 +1,8 @@
-import { DatasetColumn, getDatasetColumns, saveTemplateMapping } from "@tbm/db";
+import { DatasetColumn, getDataset, getDatasetColumns, saveTemplateMapping } from "@tbm/db";
 import { MasterTemplate, findMasterTemplate } from "./masterTemplates";
 import { ColumnMatch, matchColumnsToTemplate } from "./matchColumns";
 import { inferMasterType } from "./inferMasterType";
+import { createRefinedDataset } from "./createRefinedDataset";
 
 /**
  * Maps a source dataset's columns onto its Apptio master template and records
@@ -158,11 +159,13 @@ export interface TemplateMappingResult {
   /** LLM proposals awaiting human review — excluded from coverage. */
   suggestedCount: number;
   llmMatches: number;
+  /** Path to refined dataset with only mapped columns (created after mapping). */
+  refinedPath?: string;
 }
 
 export async function mapDatasetToTemplate(
   datasetId: string,
-  options?: { masterType?: string; useLlm?: boolean }
+  options?: { masterType?: string; useLlm?: boolean; uploadsDir?: string }
 ): Promise<TemplateMappingResult> {
   const columns = await getDatasetColumns(datasetId);
   const columnNames = columns.map((c) => c.column_name);
@@ -239,6 +242,22 @@ export async function mapDatasetToTemplate(
     missingColumns,
   });
 
+  // Create refined dataset with only mapped columns (input to Data Quality phase)
+  let refinedPath: string | undefined;
+  if (confirmed.length > 0) {
+    try {
+      const refinedResult = await createRefinedDataset(datasetId, {
+        uploadsDir: options?.uploadsDir,
+      });
+      if (refinedResult) {
+        refinedPath = refinedResult.refinedPath;
+        console.log(`[MapToTemplate] Created refined dataset: ${refinedResult.refinedFileName} with ${refinedResult.mappedColumns} columns`);
+      }
+    } catch (err) {
+      console.error("[MapToTemplate] Failed to create refined dataset:", err);
+    }
+  }
+
   return {
     datasetId,
     masterType: template.masterType,
@@ -252,5 +271,6 @@ export async function mapDatasetToTemplate(
     missingColumns,
     unmappedSourceColumns,
     llmMatches,
+    refinedPath,
   };
 }

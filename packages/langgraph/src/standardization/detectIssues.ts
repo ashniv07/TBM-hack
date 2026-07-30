@@ -1,7 +1,8 @@
 import path from "path";
-import { EMBEDDABLE_ROLES, getDatasetColumns, getContextEntitiesByType, listDatasets } from "@tbm/db";
+import { EMBEDDABLE_ROLES, getDatasetColumns, getContextEntitiesByType, listDatasets, getColumnMappings } from "@tbm/db";
 import { readWorkbookRows } from "../shared/readWorkbookRows";
 import { StandardizationState, DetectedIssue, DerivedSchema } from "./state";
+import { normalizeDatasetToMaster, NormalizedDataset } from "../templates/normalizeToMaster";
 
 // Valid ISO 4217 currency codes (common subset)
 const VALID_CURRENCIES = new Set([
@@ -45,26 +46,76 @@ export async function detectIssuesNode(state: StandardizationState): Promise<Par
     }
 
     for (const dataset of datasets) {
-      const columns = await getDatasetColumns(dataset.id);
+      const allColumns = await getDatasetColumns(dataset.id);
 
-      // Load rows for detailed analysis
+      // Get column mappings to filter only mapped columns
+      const columnMappings = await getColumnMappings(dataset.id);
+      const mappedSourceColumns = new Set(
+        columnMappings
+          .filter((m) => m.template_column) // Only columns that have a template mapping
+          .map((m) => m.source_column)
+      );
+
+      // Filter to only include mapped columns (ignore unmapped source columns)
+      // This ensures Data Quality only analyzes the refined/mapped dataset
+      const columns = allColumns.filter((c) => mappedSourceColumns.has(c.column_name));
+
+      // Skip datasets with no mapped columns
+      if (columns.length === 0 && allColumns.length > 0) {
+        console.log(`[DetectIssues] Dataset ${dataset.file_name}: No mapped columns, skipping quality analysis`);
+        continue;
+      }
+
+      // Try to get normalized (master-formatted) data first
+      let normalizedData: NormalizedDataset | null = null;
       let rows: Record<string, unknown>[] = [];
+      let columnNameMap: Map<string, string> | null = null; // source column -> template column
+
       try {
-        const candidatePaths = [dataset.storage_path];
-        if (state.uploadsDir) {
-          candidatePaths.push(path.join(state.uploadsDir, path.basename(dataset.storage_path)));
-        }
-        for (const candidatePath of candidatePaths) {
-          try {
-            const result = await readWorkbookRows(candidatePath);
-            rows = result.rows;
-            break;
-          } catch {
-            // Try next path
-          }
+        normalizedData = await normalizeDatasetToMaster(dataset.id, {
+          uploadsDir: state.uploadsDir,
+        });
+        if (normalizedData && normalizedData.rows.length > 0) {
+          // Use normalized rows (columns are in master template format)
+          rows = normalizedData.rows;
+          columnNameMap = new Map(
+            Array.from(normalizedData.columnMapping.entries()).map(([template, source]) => [source, template])
+          );
         }
       } catch {
-        // If we can't read the file, skip row-level analysis
+        // Normalization failed, fall back to source data
+      }
+
+      // Fall back to source data if normalization didn't work
+      // Prefer refined file (only mapped columns) over source file
+      if (rows.length === 0) {
+        try {
+          const candidatePaths: string[] = [];
+          // Prefer refined file if available (contains only mapped columns with template names)
+          if (dataset.refined_path) {
+            candidatePaths.push(dataset.refined_path);
+            if (state.uploadsDir) {
+              candidatePaths.push(path.join(state.uploadsDir, path.basename(dataset.refined_path)));
+            }
+          }
+          // Fall back to source file
+          candidatePaths.push(dataset.storage_path);
+          if (state.uploadsDir) {
+            candidatePaths.push(path.join(state.uploadsDir, path.basename(dataset.storage_path)));
+          }
+          for (const candidatePath of candidatePaths) {
+            try {
+              const result = await readWorkbookRows(candidatePath);
+              rows = result.rows;
+              console.log(`[DetectIssues] Using file: ${candidatePath} with ${rows.length} rows`);
+              break;
+            } catch {
+              // Try next path
+            }
+          }
+        } catch {
+          // If we can't read the file, skip row-level analysis
+        }
       }
 
       // Check each column for issues
@@ -75,6 +126,14 @@ export async function detectIssuesNode(state: StandardizationState): Promise<Par
         // on join keys and benchmark helpers.
         if (col.is_technical) continue;
 
+        // Get the column name to use for row lookups:
+        // - If we have normalized data, use the mapped template column name
+        // - Otherwise use the source column name
+        const rowColumnName = columnNameMap?.get(col.column_name) ?? col.column_name;
+        const displayColumnName = columnNameMap?.get(col.column_name)
+          ? `${columnNameMap.get(col.column_name)} (mapped from ${col.column_name})`
+          : col.column_name;
+
         // 1. Missing value detection (from profiling data)
         if (col.null_pct !== null && col.null_pct > 50) {
           issues.push({
@@ -82,8 +141,8 @@ export async function detectIssuesNode(state: StandardizationState): Promise<Par
             columnId: col.id,
             issueType: "missing_value",
             severity: col.null_pct > 80 ? "error" : "warning",
-            title: `High null percentage in ${col.column_name}`,
-            description: `Column "${col.column_name}" has ${col.null_pct.toFixed(1)}% null values, which may indicate data quality issues or missing data collection.`,
+            title: `High null percentage in ${displayColumnName}`,
+            description: `Column "${displayColumnName}" has ${col.null_pct.toFixed(1)}% null values, which may indicate data quality issues or missing data collection.`,
             affectedRows: rows.length > 0 ? Math.round(rows.length * col.null_pct / 100) : undefined,
             suggestedFix: col.null_pct > 80
               ? "Consider removing this column or investigating why data is missing"
@@ -109,8 +168,8 @@ export async function detectIssuesNode(state: StandardizationState): Promise<Par
               columnId: col.id,
               issueType: "schema_mismatch",
               severity: "warning",
-              title: `Type mismatch for ${col.column_name}`,
-              description: `Column "${col.column_name}" has type "${col.inferred_type}" but canonical schema expects "${canonical.inferredType}" for ${col.semantic_role} in ${dataset.source_type} datasets.`,
+              title: `Type mismatch for ${displayColumnName}`,
+              description: `Column "${displayColumnName}" has type "${col.inferred_type}" but canonical schema expects "${canonical.inferredType}" for ${col.semantic_role} in ${dataset.source_type} datasets.`,
               suggestedFix: `Convert column values to ${canonical.inferredType} type`,
             });
           }
@@ -123,7 +182,7 @@ export async function detectIssuesNode(state: StandardizationState): Promise<Par
         if (col.semantic_role === "currency" || col.column_name.toLowerCase().includes("currency")) {
           const invalidCurrencies: string[] = [];
           for (const row of rows) {
-            const value = row[col.column_name];
+            const value = row[rowColumnName];
             if (value === null || value === undefined) continue;
             const code = String(value).trim().toUpperCase();
             if (code && !VALID_CURRENCIES.has(code)) {
@@ -138,7 +197,7 @@ export async function detectIssuesNode(state: StandardizationState): Promise<Par
               columnId: col.id,
               issueType: "invalid_currency",
               severity: "error",
-              title: `Invalid currency codes in ${col.column_name}`,
+              title: `Invalid currency codes in ${displayColumnName}`,
               description: `Found ${invalidCurrencies.length} invalid currency code(s) that don't match ISO 4217 standard.`,
               sampleValues: invalidCurrencies.slice(0, 5),
               suggestedFix: "Normalize currency codes to ISO 4217 standard (e.g., USD, EUR, GBP)",
@@ -150,7 +209,7 @@ export async function detectIssuesNode(state: StandardizationState): Promise<Par
         if (col.inferred_type === "date" || col.column_name.toLowerCase().includes("date")) {
           const invalidDates: string[] = [];
           for (const row of rows) {
-            const value = row[col.column_name];
+            const value = row[rowColumnName];
             if (value === null || value === undefined || value === "") continue;
             // Skip if already a valid ISO date string or Date object
             if (value instanceof Date) continue;
@@ -168,7 +227,7 @@ export async function detectIssuesNode(state: StandardizationState): Promise<Par
               columnId: col.id,
               issueType: "invalid_date",
               severity: "warning",
-              title: `Unparseable dates in ${col.column_name}`,
+              title: `Unparseable dates in ${displayColumnName}`,
               description: `Found values that cannot be parsed as valid dates.`,
               sampleValues: invalidDates.slice(0, 5),
               suggestedFix: "Normalize date values to ISO 8601 format (YYYY-MM-DD)",
@@ -180,7 +239,7 @@ export async function detectIssuesNode(state: StandardizationState): Promise<Par
         if (col.inferred_type === "number" || col.inferred_type === "integer") {
           const values: number[] = [];
           for (const row of rows) {
-            const value = row[col.column_name];
+            const value = row[rowColumnName];
             if (value === null || value === undefined) continue;
             const num = typeof value === "number" ? value : parseFloat(String(value));
             if (!isNaN(num)) values.push(num);
@@ -199,7 +258,7 @@ export async function detectIssuesNode(state: StandardizationState): Promise<Par
                   columnId: col.id,
                   issueType: "outlier",
                   severity: "info",
-                  title: `Outliers detected in ${col.column_name}`,
+                  title: `Outliers detected in ${displayColumnName}`,
                   description: `Found ${outliers.length} value(s) more than 3 standard deviations from the mean (${mean.toFixed(2)} ± ${stdDev.toFixed(2)}).`,
                   affectedRows: outliers.length,
                   sampleValues: outliers.slice(0, 5),
@@ -216,7 +275,7 @@ export async function detectIssuesNode(state: StandardizationState): Promise<Par
           if (knownEntities.size > 0) {
             const unknownValues: string[] = [];
             for (const row of rows) {
-              const value = row[col.column_name];
+              const value = row[rowColumnName];
               if (value === null || value === undefined || value === "") continue;
               const strValue = String(value).toLowerCase().trim();
               if (!knownEntities.has(strValue)) {
@@ -231,7 +290,7 @@ export async function detectIssuesNode(state: StandardizationState): Promise<Par
                 columnId: col.id,
                 issueType: "invalid_reference",
                 severity: "warning",
-                title: `Unknown ${col.semantic_role} references in ${col.column_name}`,
+                title: `Unknown ${col.semantic_role} references in ${displayColumnName}`,
                 description: `Found ${unknownValues.length} value(s) not found in the knowledge graph as known ${col.semantic_role} entities.`,
                 sampleValues: unknownValues.slice(0, 5),
                 suggestedFix: `Add missing ${col.semantic_role} entities to the knowledge graph or correct the values`,
@@ -241,21 +300,35 @@ export async function detectIssuesNode(state: StandardizationState): Promise<Par
         }
       }
 
-      // 7. Duplicate row detection (based on candidate key columns)
-      const keyColumns = columns.filter((c) => c.is_candidate_key);
+      // 7. Duplicate row detection
+      // Use candidate key columns if available, otherwise use all mapped non-technical columns
+      // Note: 'columns' is already filtered to only include mapped columns
+      let keyColumns = columns.filter((c) => c.is_candidate_key);
+      let usingAllColumns = false;
+
+      if (keyColumns.length === 0) {
+        // No candidate keys - use all mapped non-technical columns for duplicate detection
+        keyColumns = columns.filter((c) => !c.is_technical);
+        usingAllColumns = true;
+      }
+
       if (keyColumns.length > 0 && rows.length > 0) {
         const seen = new Map<string, number>();
         let duplicateCount = 0;
         const duplicateExamples: string[] = [];
 
         for (const row of rows) {
-          const keyValues = keyColumns.map((c) => String(row[c.column_name] ?? "")).join("|");
+          // Use the mapped column name for duplicate detection
+          const keyValues = keyColumns.map((c) => {
+            const keyColName = columnNameMap?.get(c.column_name) ?? c.column_name;
+            return String(row[keyColName] ?? "");
+          }).join("|");
           const count = (seen.get(keyValues) ?? 0) + 1;
           seen.set(keyValues, count);
           if (count === 2) {
             duplicateCount++;
             if (duplicateExamples.length < 5) {
-              duplicateExamples.push(keyValues);
+              duplicateExamples.push(keyValues.substring(0, 100)); // Truncate for display
             }
           } else if (count > 2) {
             duplicateCount++;
@@ -263,15 +336,18 @@ export async function detectIssuesNode(state: StandardizationState): Promise<Par
         }
 
         if (duplicateCount > 0) {
+          const keyColNames = keyColumns.map((c) => c.column_name).join(", ");
           issues.push({
             datasetId: dataset.id,
             issueType: "duplicate",
             severity: duplicateCount > rows.length * 0.1 ? "error" : "warning",
             title: `Duplicate rows detected`,
-            description: `Found ${duplicateCount} duplicate row(s) based on key column(s): ${keyColumns.map((c) => c.column_name).join(", ")}.`,
+            description: usingAllColumns
+              ? `Found ${duplicateCount} exact duplicate row(s) across all ${keyColumns.length} columns.`
+              : `Found ${duplicateCount} duplicate row(s) based on key column(s): ${keyColNames}.`,
             affectedRows: duplicateCount,
             sampleValues: duplicateExamples,
-            suggestedFix: "Review and remove duplicate rows or adjust key column selection",
+            suggestedFix: "Review and remove duplicate rows",
           });
         }
       }

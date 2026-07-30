@@ -78,7 +78,7 @@ async function seed() {
             failures.push({ fileName, stage: "ingestion", error: result.error ?? "no datasetId" });
             return;
           }
-          await mapDatasetToTemplate(result.datasetId);
+          await mapDatasetToTemplate(result.datasetId, { uploadsDir: UPLOAD_DIR });
           await runUnderstanding(result.datasetId);
           await runEmbedding(result.datasetId, { uploadsDir: UPLOAD_DIR, rows: result.sheet?.rows });
           ingested++;

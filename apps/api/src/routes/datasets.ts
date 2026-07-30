@@ -56,7 +56,8 @@ datasetsRouter.post("/upload", upload.array("files", 20), wrap(async (req, res) 
           try {
             // Match the source columns onto their Apptio master template first:
             // everything downstream is "how well does this satisfy the template".
-            await mapDatasetToTemplate(ingested.datasetId);
+            // This also creates a refined dataset with only mapped columns.
+            await mapDatasetToTemplate(ingested.datasetId, { uploadsDir: UPLOAD_DIR });
             await runUnderstanding(ingested.datasetId);
             await runEmbedding(ingested.datasetId, { uploadsDir: UPLOAD_DIR, rows: ingested.sheet?.rows });
           } catch (stageErr) {

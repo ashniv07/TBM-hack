@@ -1,5 +1,6 @@
 import { ChatOpenAI } from "@langchain/openai";
 import { StandardizationState, DetectedIssue, ProposedCorrection } from "./state";
+import { getQualityIssue, insertCorrection } from "@tbm/db";
 
 // Correction types mapped to issue types
 const ISSUE_TO_CORRECTION: Record<string, string> = {
@@ -362,4 +363,180 @@ function normalizeDateHeuristic(value: string): string | null {
   }
 
   return null;
+}
+
+/**
+ * Generate AI fix for a specific issue on-demand.
+ * Called when user acknowledges an issue - generates corrections and saves them to DB.
+ */
+export async function generateAIFixForIssue(issueId: string): Promise<{
+  ok: boolean;
+  corrections?: { id: string; originalValue?: string; correctedValue?: string; confidence: number; reasoning?: string }[];
+  message?: string;
+  error?: string;
+}> {
+  try {
+    // 1. Fetch the issue from DB
+    const issue = await getQualityIssue(issueId);
+    if (!issue) {
+      return { ok: false, error: "Issue not found" };
+    }
+
+    // 2. Convert to DetectedIssue format
+    const detectedIssue: DetectedIssue = {
+      datasetId: issue.dataset_id,
+      columnId: issue.column_id ?? undefined,
+      issueType: issue.issue_type,
+      severity: issue.severity as DetectedIssue["severity"],
+      title: issue.title,
+      description: issue.description ?? "",
+      affectedRows: issue.affected_rows ?? undefined,
+      sampleValues: issue.sample_values ?? [],
+      suggestedFix: issue.suggested_fix ?? undefined,
+    };
+
+    // 3. Generate corrections (AI or heuristic)
+    const hasOpenAI = !!process.env.OPENAI_API_KEY;
+    let corrections: ProposedCorrection[] = [];
+
+    if (hasOpenAI) {
+      corrections = await generateAICorrections(detectedIssue);
+    }
+
+    // Fall back to heuristics if AI didn't produce results
+    if (corrections.length === 0) {
+      corrections = generateHeuristicCorrections(detectedIssue);
+    }
+
+    // If still no corrections, generate a general fix based on issue type
+    if (corrections.length === 0) {
+      corrections = generateDefaultCorrections(detectedIssue);
+    }
+
+    if (corrections.length === 0) {
+      return {
+        ok: true,
+        corrections: [],
+        message: "No automatic corrections could be generated for this issue type. Manual review required.",
+      };
+    }
+
+    // 4. Save corrections to database
+    const savedCorrections = [];
+    for (const correction of corrections) {
+      const saved = await insertCorrection({
+        issueId,
+        datasetId: correction.datasetId,
+        columnId: correction.columnId,
+        correctionType: correction.correctionType,
+        originalValue: correction.originalValue,
+        correctedValue: correction.correctedValue,
+        affectedRows: correction.affectedRows,
+        confidence: correction.confidence,
+        reasoning: correction.reasoning,
+      });
+      savedCorrections.push({
+        id: saved.id,
+        originalValue: saved.original_value ?? undefined,
+        correctedValue: saved.corrected_value ?? undefined,
+        confidence: saved.confidence,
+        reasoning: saved.reasoning ?? undefined,
+      });
+    }
+
+    return {
+      ok: true,
+      corrections: savedCorrections,
+      message: `Generated ${savedCorrections.length} correction(s) for this issue.`,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "Failed to generate corrections",
+    };
+  }
+}
+
+/**
+ * Generate default corrections when AI and heuristics don't produce results.
+ * Ensures every acknowledged issue gets at least one correction entry.
+ */
+function generateDefaultCorrections(issue: DetectedIssue): ProposedCorrection[] {
+  const corrections: ProposedCorrection[] = [];
+
+  switch (issue.issueType) {
+    case "duplicate":
+      corrections.push({
+        datasetId: issue.datasetId,
+        columnId: issue.columnId,
+        correctionType: "remove_duplicate",
+        affectedRows: issue.affectedRows,
+        confidence: 0.7,
+        reasoning: `Remove ${issue.affectedRows ?? "multiple"} duplicate rows to ensure data integrity`,
+      });
+      break;
+
+    case "missing_value":
+      corrections.push({
+        datasetId: issue.datasetId,
+        columnId: issue.columnId,
+        correctionType: "fill_missing",
+        affectedRows: issue.affectedRows,
+        confidence: 0.6,
+        reasoning: "Fill missing values with appropriate defaults based on column type and context",
+      });
+      break;
+
+    case "outlier":
+      corrections.push({
+        datasetId: issue.datasetId,
+        columnId: issue.columnId,
+        correctionType: "cap_outlier",
+        affectedRows: issue.affectedRows,
+        confidence: 0.5,
+        reasoning: "Cap outlier values to reasonable bounds based on statistical analysis",
+      });
+      break;
+
+    case "invalid_reference":
+      corrections.push({
+        datasetId: issue.datasetId,
+        columnId: issue.columnId,
+        correctionType: "resolve_reference",
+        affectedRows: issue.affectedRows,
+        confidence: 0.5,
+        reasoning: "Resolve invalid references by fuzzy matching to known entities in master data",
+      });
+      break;
+
+    case "schema_mismatch":
+      corrections.push({
+        datasetId: issue.datasetId,
+        columnId: issue.columnId,
+        correctionType: "convert_type",
+        confidence: 0.7,
+        reasoning: "Convert column values to match expected schema type",
+      });
+      break;
+
+    // Skip these issue types - they are informational only
+    case "missing_template_columns":
+    case "unmapped_source_columns":
+      break;
+
+    default:
+      // Only create a correction if it's not a meta-level issue
+      if (issue.sampleValues && issue.sampleValues.length > 0) {
+        corrections.push({
+          datasetId: issue.datasetId,
+          columnId: issue.columnId,
+          correctionType: "standardize",
+          affectedRows: issue.affectedRows,
+          confidence: 0.5,
+          reasoning: issue.suggestedFix ?? "Apply standardization rules to normalize values",
+        });
+      }
+  }
+
+  return corrections;
 }
