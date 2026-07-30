@@ -113,17 +113,12 @@ export async function buildRefinedWorkbook(
     sheet.columns = template.expectedColumns.map((c) => ({ header: c, key: c, width: 22 }));
     header(sheet);
 
-    // Load refined file for template columns
+    // Load refined file - this is the source for both data and ATUM lookups
+    // The refined dataset from Data Quality phase contains the mapped columns
     const refinedRows = await loadRows(dataset, options?.uploadsDir);
 
-    // Also load source file for ATUM lookups (ATUM mappings use original source values)
-    const sourceRows = await loadSourceRows(dataset.storage_path, options?.uploadsDir);
-
     if (refinedRows) {
-      for (let i = 0; i < refinedRows.length; i++) {
-        const row = refinedRows[i];
-        const sourceRow = sourceRows?.[i] ?? row; // Fall back to refined row if source unavailable
-
+      for (const row of refinedRows) {
         const out: Record<string, unknown> = {};
         for (const templateColumn of template.expectedColumns) {
           // In refined file, columns are already named with template names
@@ -134,9 +129,9 @@ export async function buildRefinedWorkbook(
         }
 
         // Apply ATUM Cost Pool mapping: update "Cost Pool" and "Cost Sub Pool" columns
-        // by looking up any cell value in the source row against approved ATUM mappings
+        // by looking up any cell value in the REFINED row against approved ATUM mappings
         if (costPoolLookup.size > 0) {
-          for (const cellValue of Object.values(sourceRow)) {
+          for (const cellValue of Object.values(row)) {
             if (cellValue == null || cellValue === "") continue;
             const match = costPoolLookup.get(String(cellValue).toLowerCase());
             if (match) {
@@ -150,7 +145,7 @@ export async function buildRefinedWorkbook(
 
         // Apply ATUM Resource Tower mapping: update "IT Resource Tower" and "IT Resource Sub Tower" columns
         if (resourceTowerLookup.size > 0) {
-          for (const cellValue of Object.values(sourceRow)) {
+          for (const cellValue of Object.values(row)) {
             if (cellValue == null || cellValue === "") continue;
             const match = resourceTowerLookup.get(String(cellValue).toLowerCase());
             if (match) {
